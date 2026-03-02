@@ -55,6 +55,7 @@ This file mirrors `cladue.md` but is formatted for another AI workflow.
 ```bash
 npm test
 npm run build
+npm run build:renderer
 npm run dev:cli -- --help
 ```
 
@@ -63,6 +64,12 @@ npm run dev:cli -- --help
 - Windows packaging path is CI-automated.
 - macOS/Linux packaging remains manual script driven.
 - If icon assets are added later, document them in README and workflow notes.
+- Packaging guardrails:
+  - Builder output directory is `release/` (do not emit package outputs under `dist/`)
+  - Package only `dist/electron`, `dist/src`, `dist/gui`, and `package.json`
+  - Exclude `*.map`, `*.d.ts`, `*.d.ts.map` from packaged app
+  - Restrict locales to `en`, `ko` unless scope expands
+  - Keep compression at `maximum`
 
 ## Documentation Consistency Rules
 

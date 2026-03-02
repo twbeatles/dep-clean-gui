@@ -21,11 +21,11 @@
     "dev:cli": "tsx bin/cli.ts",
     "start": "node dist/bin/cli.js",
     "start:gui": "electron dist/electron/main.js",
-    "clean": "rimraf dist",
+    "clean": "rimraf dist release",
     "test": "tsx --test test/**/*.test.ts",
-    "package:win": "npm run build && electron-builder --win",
-    "package:mac": "npm run build && electron-builder --mac",
-    "package:linux": "npm run build && electron-builder --linux"
+    "package:win": "npm run clean && npm run build && electron-builder --win",
+    "package:mac": "npm run clean && npm run build && electron-builder --mac",
+    "package:linux": "npm run clean && npm run build && electron-builder --linux"
   },
   "keywords": [
     "cli",
@@ -65,12 +65,24 @@
   "build": {
     "appId": "com.kuneosu.depclean.gui",
     "productName": "dep-clean-gui",
+    "asar": true,
+    "compression": "maximum",
+    "electronLanguages": [
+      "en",
+      "ko"
+    ],
     "files": [
-      "dist/**/*",
-      "package.json"
+      "dist/electron/**/*",
+      "dist/src/**/*",
+      "dist/gui/**/*",
+      "package.json",
+      "!**/*.map",
+      "!**/*.d.ts",
+      "!**/*.d.ts.map"
     ],
     "directories": {
-      "buildResources": "electron/assets"
+      "buildResources": "electron/assets",
+      "output": "release"
     },
     "mac": {
       "category": "public.app-category.developer-tools"

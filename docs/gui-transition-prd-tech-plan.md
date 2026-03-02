@@ -152,3 +152,17 @@ Core flow:
 - Repository is maintained as a fork (`twbeatles/dep-clean-gui`).
 - Fork-specific product decisions (resident UX, startup flow, release automation) are documented here.
 - When syncing with upstream, preserve fork-only desktop policy unless explicitly changed.
+
+## 15. Packaging Guardrails (Size + Recursion Safety)
+- Package output directory must be `release/` and must not be nested under `dist/`.
+- `dist/` should contain only compiled app runtime sources.
+- Package include scope is restricted to:
+  - `dist/electron/**/*`
+  - `dist/src/**/*`
+  - `dist/gui/**/*`
+  - `package.json`
+- Exclude development-only artifacts (`*.map`, `*.d.ts`, `*.d.ts.map`) from packaged app.
+- Restrict Electron locales to required set (`en`, `ko`) unless product requirements change.
+- Keep package compression at `maximum` for distribution builds.
+- Regression rule:
+  - If installer size grows unexpectedly, first inspect `app.asar` for recursive build-output inclusion.

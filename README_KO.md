@@ -43,6 +43,19 @@
 
 설치 파일은 GitHub Releases에서 배포합니다.
 
+## 패키징 용량 정책
+
+- `electron-builder` 출력 디렉터리는 `release/`를 사용합니다 (`dist/` 미사용).
+- `dist/`는 앱 컴파일 결과물만 보관합니다.
+- 패키징 포함 대상은 런타임 필수 산출물로 제한합니다:
+  - `dist/electron/**/*`
+  - `dist/src/**/*`
+  - `dist/gui/**/*`
+  - `package.json`
+- 소스맵/선언 파일(`*.map`, `*.d.ts`)은 패키지에서 제외합니다.
+- Electron 로케일은 `en`, `ko`만 포함합니다.
+- 압축 정책은 `maximum`을 사용합니다.
+
 ## CLI 호환성
 
 기존 CLI 명령은 계속 사용 가능합니다.
@@ -66,11 +79,17 @@ npm test
 # 전체 빌드
 npm run build
 
+# GUI 렌더러만 빌드
+npm run build:renderer
+
 # GUI 개발 실행
 npm run dev
 
 # CLI 개발 실행
 npm run dev:cli -- --help
+
+# 빌드/패키징 산출물 정리
+npm run clean
 
 # 패키징
 npm run package:win

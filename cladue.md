@@ -52,12 +52,19 @@ The filename intentionally follows project request: `cladue.md`.
   - `npm run package:win`
   - `npm run package:mac`
   - `npm run package:linux`
+- Packaging guardrails:
+  - `electron-builder` output path: `release/` (never under `dist/`)
+  - package include scope: `dist/electron`, `dist/src`, `dist/gui`, `package.json`
+  - exclude: `*.map`, `*.d.ts`, `*.d.ts.map`
+  - locales: `en`, `ko`
+  - compression: `maximum`
 
 ## Verification Commands
 
 ```bash
 npm test
 npm run build
+npm run build:renderer
 npm run dev:cli -- --help
 npm run package:win
 ```

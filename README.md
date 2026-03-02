@@ -43,6 +43,19 @@ You do not need `npm start` as an end user.
 
 Installers are distributed through GitHub Releases.
 
+## Packaging Footprint Policy
+
+- `electron-builder` output directory is `release/` (not `dist/`).
+- `dist/` is reserved for compiled app sources only.
+- Packaging includes only runtime-required artifacts:
+  - `dist/electron/**/*`
+  - `dist/src/**/*`
+  - `dist/gui/**/*`
+  - `package.json`
+- Source maps and declaration artifacts are excluded from packaged output.
+- Electron locales are restricted to `en` and `ko`.
+- Compression is set to `maximum`.
+
 ## CLI Compatibility
 
 The original CLI behavior remains available.
@@ -66,11 +79,17 @@ npm test
 # build all
 npm run build
 
+# build GUI renderer only
+npm run build:renderer
+
 # run GUI in dev mode
 npm run dev
 
 # run CLI in dev mode
 npm run dev:cli -- --help
+
+# clean build/package outputs
+npm run clean
 
 # package targets
 npm run package:win
