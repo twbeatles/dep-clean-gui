@@ -1,106 +1,87 @@
-# dep-clean
+﻿# dep-clean-gui
 
-[English](./README.md) | 한국어
+[English](./README.md) | Korean
 
-`node_modules`, `venv`, `__pycache__` 등 의존성/캐시 디렉토리를 찾아 일괄 삭제하는 CLI 도구입니다.
+원본 `dep-clean` CLI 프로젝트를 기반으로 GUI 상주 앱 기능을 확장한 포크 저장소입니다.
+현재 저장소(`twbeatles/dep-clean-gui`)는 CLI 호환성을 유지하면서 데스크톱 상주 운영 흐름을 제공합니다.
 
-[![npm version](https://img.shields.io/npm/v/@kuneosu/dep-clean.svg)](https://www.npmjs.com/package/@kuneosu/dep-clean)
+## 포크 리포지토리 안내
 
-## 설치
+- 이 저장소는 **포크 기반 리포지토리**입니다.
+- 핵심 스캔/정리 로직은 기존 CLI 모델을 계승합니다.
+- GUI 상주 UX와 배포 정책은 이 포크에서 확장 관리합니다.
+
+## 이 포크에서 추가된 기능
+
+- Electron + React 기반 데스크톱 GUI
+- 하이브리드 감시(주기 스캔 + 실시간 감시)
+- 선택 폴더 세트(일괄 스캔)
+- 임계치 알림(전체 + 개별 타겟)
+- 승인 기반 삭제 플로우
+- 트레이 상주 라이프사이클(창 닫기 = 트레이 최소화)
+
+## 사용자 실행 방식
+
+일반 사용자는 `npm start`가 필요하지 않습니다.
+
+1. 설치 패키지(`.exe` 등) 설치
+2. 운영체제 앱 메뉴에서 실행
+3. 첫 GUI 실행 시 시작 옵션 선택
+4. 완전 종료는 트레이 메뉴 `Quit` 사용
+
+## 시작/상주 정책
+
+- 첫 GUI 실행 시 startup 선택 모달이 표시됩니다.
+- `자동 시작 사용`: 로그인 시 트레이 모드로 실행
+- `나중에`: 자동 시작 비활성 유지 (설정에서 변경 가능)
+- 창 닫기는 항상 트레이 최소화로 동작합니다.
+
+## 릴리스 정책
+
+- Windows: GitHub Actions 자동 릴리스 (`v*` 태그 또는 수동 실행)
+- macOS / Linux: 로컬 수동 패키징 스크립트 사용
+
+설치 파일은 GitHub Releases에서 배포합니다.
+
+## CLI 호환성
+
+기존 CLI 명령은 계속 사용 가능합니다.
 
 ```bash
-npm install -g @kuneosu/dep-clean
-```
-
-## 사용법
-
-```bash
-# 현재 디렉토리 스캔 (대화형 선택)
-dep-clean
-
-# 특정 디렉토리 스캔
-dep-clean ./projects
-
-# 목록만 확인 (삭제 안함)
-dep-clean --dry-run
-
-# 선택 UI 없이 전체 삭제
-dep-clean -y
-
-# 특정 타입만 삭제
-dep-clean --only node_modules
-dep-clean --only node_modules,venv
-
-# 특정 타입 제외
-dep-clean --exclude vendor,Pods
-
-# 도움말
 dep-clean --help
+dep-clean --dry-run
+dep-clean --only node_modules,venv
+dep-clean --exclude vendor,Pods
 ```
 
-## 옵션
+## 개발 명령
 
-| 옵션 | 설명 |
-|------|------|
-| `-y, --yes` | 선택 UI 없이 전체 삭제 |
-| `--dry-run` | 목록만 확인 (삭제 안함) |
-| `--only <items>` | 특정 타입만 삭제 (쉼표 구분) |
-| `--exclude <items>` | 특정 타입 제외 (쉼표 구분) |
-| `-h, --help` | 도움말 |
-| `-V, --version` | 버전 정보 |
+```bash
+# 의존성 설치
+npm ci
 
-## 대화형 선택
+# 테스트
+npm test
 
-기본 모드에서는 체크박스 UI를 통해 개별 디렉토리를 선택하여 삭제할 수 있습니다.
+# 전체 빌드
+npm run build
 
-| 키 | 동작 |
-|----|------|
-| `↑` / `↓` | 커서 이동 |
-| `Space` | 선택 토글 |
-| `a` | 전체 선택/해제 |
-| `Enter` | 확인 후 삭제 |
-| `n` | 취소 |
+# GUI 개발 실행
+npm run dev
 
-## 삭제 대상 디렉토리
+# CLI 개발 실행
+npm run dev:cli -- --help
 
-| 언어/프레임워크 | 디렉토리 |
-|----------------|----------|
-| JavaScript/Node.js | `node_modules`, `.next`, `dist`, `build`, `.parcel-cache`, `.turbo` |
-| Python | `venv`, `.venv`, `env`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.egg-info` |
-| Java/Kotlin | `target`, `.gradle` |
-| Rust | `target` |
-| Go | `vendor` |
-| Ruby | `vendor/bundle` |
-| PHP | `vendor` |
-| .NET | `bin`, `obj`, `packages` |
-| iOS/macOS | `Pods`, `DerivedData` |
-
-## 실행 예시
-
+# 패키징
+npm run package:win
+npm run package:mac
+npm run package:linux
 ```
-🔍 Scanning /Users/k/projects...
 
-Found 5 directories to clean:
+## AI 세션 인수인계 문서
 
-  📁 ./project-a/node_modules     (245 MB)
-  📁 ./project-b/node_modules     (312 MB)
-  📁 ./python-app/venv            (89 MB)
-  📁 ./python-app/__pycache__     (2 MB)
-  📁 ./rust-app/target            (1.2 GB)
-
-Total: 1.85 GB
-
-? Select directories to delete:
-  (Space: toggle, a: toggle all, Enter: confirm, n: cancel)
-
-❯ [x] ./project-a/node_modules     (245 MB)
-  [x] ./project-b/node_modules     (312 MB)
-  [ ] ./python-app/venv            (89 MB)
-  [x] ./python-app/__pycache__     (2 MB)
-  [x] ./rust-app/target            (1.2 GB)
-
-✅ Deleted 4 directories, freed 1.76 GB
-```
+- [cladue.md](./cladue.md)
+- [gemini.md](./gemini.md)
 
 ## 라이선스
 

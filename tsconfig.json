@@ -15,6 +15,6 @@
     "sourceMap": true,
     "resolveJsonModule": true
   },
-  "include": ["bin/**/*", "src/**/*"],
+  "include": ["bin/**/*", "src/**/*", "electron/**/*"],
   "exclude": ["node_modules", "dist"]
 }

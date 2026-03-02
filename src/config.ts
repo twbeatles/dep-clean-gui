@@ -1,3 +1,5 @@
+import type { AppSettings } from './types.js';
+
 export const DEFAULT_TARGETS: string[] = [
   // JavaScript/Node.js
   'node_modules',
@@ -45,3 +47,25 @@ export const SKIP_DIRECTORIES: string[] = [
   '.svn',
   '.hg',
 ];
+
+export const DEFAULT_PERIODIC_MINUTES = 60;
+export const MIN_PERIODIC_MINUTES = 5;
+export const MAX_PERIODIC_MINUTES = 1440;
+export const DEFAULT_ALERT_COOLDOWN_MINUTES = 30;
+
+export const DEFAULT_GLOBAL_THRESHOLD_BYTES = 5 * 1024 * 1024 * 1024; // 5 GB
+
+export function createDefaultSettings(): AppSettings {
+  return {
+    autoStart: false,
+    startupChoiceCompleted: false,
+    runInTray: true,
+    periodicEnabled: true,
+    periodicMinutes: DEFAULT_PERIODIC_MINUTES,
+    realtimeEnabled: true,
+    globalThresholdBytes: DEFAULT_GLOBAL_THRESHOLD_BYTES,
+    alertCooldownMinutes: DEFAULT_ALERT_COOLDOWN_MINUTES,
+    watchTargets: [],
+    scanSets: [],
+  };
+}

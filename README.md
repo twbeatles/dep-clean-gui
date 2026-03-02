@@ -1,107 +1,87 @@
-# dep-clean
+﻿# dep-clean-gui
 
-English | [한국어](./README_KO.md)
+English | [Korean](./README_KO.md)
 
-[![npm version](https://img.shields.io/npm/v/@kuneosu/dep-clean.svg)](https://www.npmjs.com/package/@kuneosu/dep-clean)
-[![npm downloads](https://img.shields.io/npm/dm/@kuneosu/dep-clean.svg)](https://www.npmjs.com/package/@kuneosu/dep-clean)
+Fork-based desktop extension of the original `dep-clean` CLI project.
+This repository (`twbeatles/dep-clean-gui`) keeps CLI compatibility while adding a tray-resident GUI app.
 
-CLI tool to find and delete dependency/cache directories like `node_modules`, `venv`, `__pycache__`, and more.
+## Fork Context
 
-## Installation
+- This project is maintained as a **forked repository**.
+- Core scanning and cleanup behavior is inherited from the upstream CLI model.
+- GUI/runtime policies are extended in this fork for desktop resident usage.
+
+## What This Fork Adds
+
+- Electron + React desktop app
+- Hybrid monitoring (periodic scan + realtime watch)
+- Scan sets (batch scan for selected folders)
+- Threshold alerts (global + per target)
+- Approval-first cleanup flow
+- Tray-resident lifecycle (close window = hide to tray)
+
+## End User Run Model
+
+You do not need `npm start` as an end user.
+
+1. Install an app package (`.exe`, etc.)
+2. Launch from OS app menu
+3. Choose startup behavior on first GUI launch
+4. Use tray menu `Quit` for full exit
+
+## Startup and Tray Policy
+
+- First GUI launch shows a startup choice modal.
+- `Enable Auto-start`: app launches at login in tray mode.
+- `Decide Later`: no auto-start yet (can change in Settings).
+- Window close always minimizes to tray.
+
+## Release Model
+
+- Windows: automated by GitHub Actions (`v*` tags or manual dispatch)
+- macOS / Linux: packaged manually with scripts
+
+Installers are distributed through GitHub Releases.
+
+## CLI Compatibility
+
+The original CLI behavior remains available.
 
 ```bash
-npm install -g @kuneosu/dep-clean
-```
-
-## Usage
-
-```bash
-# Scan and select directories to delete (interactive)
-dep-clean
-
-# Scan specific directory
-dep-clean ./projects
-
-# Preview only (no deletion)
-dep-clean --dry-run
-
-# Delete all without selection UI
-dep-clean -y
-
-# Delete only specific types
-dep-clean --only node_modules
-dep-clean --only node_modules,venv
-
-# Exclude specific types
-dep-clean --exclude vendor,Pods
-
-# Show help
 dep-clean --help
+dep-clean --dry-run
+dep-clean --only node_modules,venv
+dep-clean --exclude vendor,Pods
 ```
 
-## Options
+## Developer Commands
 
-| Option | Description |
-|--------|-------------|
-| `-y, --yes` | Delete all without selection UI |
-| `--dry-run` | List directories without deleting |
-| `--only <items>` | Only delete specified types (comma-separated) |
-| `--exclude <items>` | Exclude specified types (comma-separated) |
-| `-h, --help` | Display help |
-| `-V, --version` | Display version |
+```bash
+# install dependencies
+npm ci
 
-## Interactive Selection
+# tests
+npm test
 
-In default mode, you can select individual directories to delete using a checkbox UI.
+# build all
+npm run build
 
-| Key | Action |
-|-----|--------|
-| `↑` / `↓` | Move cursor |
-| `Space` | Toggle selection |
-| `a` | Toggle all |
-| `Enter` | Confirm and delete |
-| `n` | Cancel |
+# run GUI in dev mode
+npm run dev
 
-## Target Directories
+# run CLI in dev mode
+npm run dev:cli -- --help
 
-| Language/Framework | Directories |
-|--------------------|-------------|
-| JavaScript/Node.js | `node_modules`, `.next`, `dist`, `build`, `.parcel-cache`, `.turbo` |
-| Python | `venv`, `.venv`, `env`, `__pycache__`, `.pytest_cache`, `.mypy_cache`, `.egg-info` |
-| Java/Kotlin | `target`, `.gradle` |
-| Rust | `target` |
-| Go | `vendor` |
-| Ruby | `vendor/bundle` |
-| PHP | `vendor` |
-| .NET | `bin`, `obj`, `packages` |
-| iOS/macOS | `Pods`, `DerivedData` |
-
-## Example Output
-
+# package targets
+npm run package:win
+npm run package:mac
+npm run package:linux
 ```
-🔍 Scanning /Users/k/projects...
 
-Found 5 directories to clean:
+## AI Session Handoff Docs
 
-  📁 ./project-a/node_modules     (245 MB)
-  📁 ./project-b/node_modules     (312 MB)
-  📁 ./python-app/venv            (89 MB)
-  📁 ./python-app/__pycache__     (2 MB)
-  📁 ./rust-app/target            (1.2 GB)
-
-Total: 1.85 GB
-
-? Select directories to delete:
-  (Space: toggle, a: toggle all, Enter: confirm, n: cancel)
-
-❯ [x] ./project-a/node_modules     (245 MB)
-  [x] ./project-b/node_modules     (312 MB)
-  [ ] ./python-app/venv            (89 MB)
-  [x] ./python-app/__pycache__     (2 MB)
-  [x] ./rust-app/target            (1.2 GB)
-
-✅ Deleted 4 directories, freed 1.76 GB
-```
+- [cladue.md](./cladue.md)
+- [gemini.md](./gemini.md)
 
 ## License
 
