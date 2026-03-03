@@ -26,7 +26,7 @@ The filename intentionally follows project request: `cladue.md`.
   - `src/types.ts`
 - Desktop runtime:
   - `electron/main.ts`
-  - `electron/preload.ts`
+  - `electron/preload.cts`
   - `gui/src/*`
 
 ## Key Fork Extensions
@@ -81,6 +81,26 @@ The filename intentionally follows project request: `cladue.md`.
   - folder picker dialog title
 - Diagnostics:
   - startup log path remains `%TEMP%/dep-clean-gui-startup.log`
+
+## Cleanup Hardening Snapshot (2026-03-03)
+
+- Approval lifecycle is now explicit:
+  - TTL is fixed to 15 minutes
+  - expired approvals are pruned every 60 seconds
+  - renderer can revoke approval via `cleanup.cancel(approvalId)`
+- Cleanup payload contract updates:
+  - `CleanupPreview` now includes `expiresAt`
+  - `CleanupConfirmResult` may include `retryPreview` when partial failures remain
+- Safety guardrails:
+  - preview paths must belong to registered roots (`watchTargets` + `scanSets`)
+  - delete selections must remain within approved roots
+  - root paths are blocked
+- Deletion semantics:
+  - removed `force: true` deletes
+  - lstat pre-check before delete
+  - transient filesystem retries for `EPERM`, `EBUSY`, `ENOTEMPTY`
+- Runtime coordination:
+  - when monitor is running, cleanup performs `watch.stop -> delete -> one rescan -> watch.start`
 
 ## Startup / Tray Rules
 

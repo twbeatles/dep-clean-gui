@@ -36,6 +36,7 @@ export interface DepCleanApi {
   cleanup: {
     preview: (paths?: string[]) => Promise<CleanupPreview>;
     confirmDelete: (approvalId: string, selectedPaths: string[]) => Promise<CleanupConfirmResult>;
+    cancel: (approvalId: string) => Promise<void>;
   };
   folders: {
     pickMany: () => Promise<string[]>;

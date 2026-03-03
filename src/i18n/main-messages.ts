@@ -18,6 +18,10 @@ const EN_MESSAGES = {
   'error.startupFailedTitle': 'dep-clean-gui startup failed',
   'error.scanSetNotFound': 'Scan set not found: {setId}',
   'error.cleanupApprovalMissing': 'Approval request expired or missing.',
+  'error.cleanupApprovalExpired': 'Approval request has expired.',
+  'error.cleanupPathOutOfScope': 'Selected path is outside approved scope: {path}',
+  'error.cleanupPreviewPathUnregistered': 'Preview path is not a registered target: {path}',
+  'error.cleanupRootPathNotAllowed': 'Root path cannot be used for cleanup: {path}',
   'error.unknownCleanup': 'Unknown error',
 } as const satisfies MessageDictionary;
 
@@ -37,6 +41,10 @@ const KO_MESSAGES = {
   'error.startupFailedTitle': 'dep-clean-gui 시작 실패',
   'error.scanSetNotFound': '스캔 세트를 찾을 수 없습니다: {setId}',
   'error.cleanupApprovalMissing': '삭제 승인 요청이 만료되었거나 존재하지 않습니다.',
+  'error.cleanupApprovalExpired': '삭제 승인 요청이 만료되었습니다.',
+  'error.cleanupPathOutOfScope': '선택된 경로가 승인 범위를 벗어났습니다: {path}',
+  'error.cleanupPreviewPathUnregistered': '미리보기 경로가 등록된 대상이 아닙니다: {path}',
+  'error.cleanupRootPathNotAllowed': '루트 경로는 정리 대상으로 사용할 수 없습니다: {path}',
   'error.unknownCleanup': '알 수 없는 오류',
 } as const satisfies MessageDictionary;
 

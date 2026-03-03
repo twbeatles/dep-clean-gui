@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -16,11 +15,21 @@ import {
   shell,
 } from 'electron';
 import { deleteDirectories } from '../src/cleaner.js';
+import {
+  CleanupApprovalStore,
+  CleanupApprovalStoreError,
+} from '../src/cleanup-approval-store.js';
+import {
+  CleanupPolicyError,
+  assertPathWithinAllowedRoots,
+  collectRegisteredRoots,
+  dedupeFoundDirectories,
+  isRootPath,
+  toCanonicalPathKey,
+} from '../src/cleanup-policy.js';
 import type {
   AppSettings,
   CleanupConfirmResult,
-  CleanupPreview,
-  FoundDirectory,
   ScanExecutionOutcome,
 } from '../src/types.js';
 import { AlertManager } from '../src/alert-manager.js';
@@ -40,6 +49,8 @@ const DEBUG_RENDERER_LOGS = process.env.DEP_CLEAN_DEBUG_LOG === '1';
 const STARTUP_LOG_FILE = process.env.DEP_CLEAN_STARTUP_LOG_PATH
   ?? path.join(os.tmpdir(), 'dep-clean-gui-startup.log');
 const ENABLE_FILE_DEBUG_LOG = app.isPackaged || DEBUG_RENDERER_LOGS;
+const CLEANUP_APPROVAL_TTL_MS = 15 * 60 * 1000;
+const CLEANUP_APPROVAL_SWEEP_INTERVAL_MS = 60 * 1000;
 
 function serializeUnknown(value: unknown): string {
   if (value instanceof Error) {
@@ -79,22 +90,16 @@ process.on('unhandledRejection', (reason) => {
   appendDebugLog('process.unhandledRejection', reason);
 });
 
-interface CleanupApproval {
-  id: string;
-  createdAt: string;
-  directories: FoundDirectory[];
-}
-
 let mainWindow: InstanceType<typeof BrowserWindow> | null = null;
 let tray: InstanceType<typeof Tray> | null = null;
 let quitting = false;
-
-const cleanupApprovals = new Map<string, CleanupApproval>();
+let cleanupSweepTimer: NodeJS.Timeout | undefined;
 
 let settingsStore: SettingsStore;
 let alertManager: AlertManager;
 let watchEngine: WatchEngine;
 let settings: AppSettings;
+let cleanupApprovalStore: CleanupApprovalStore;
 let uiLocale: SupportedLocale = 'en';
 
 function tMain(key: MainMessageKey, params?: Record<string, string | number>): string {
@@ -313,6 +318,121 @@ async function sendOsNotifications(outcome: ScanExecutionOutcome): Promise<void>
   }
 }
 
+function normalizeInputPaths(paths?: string[]): string[] {
+  if (!paths || paths.length === 0) return [];
+
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const inputPath of paths) {
+    const trimmed = inputPath.trim();
+    if (!trimmed) continue;
+
+    const resolved = path.resolve(trimmed);
+    const key = toCanonicalPathKey(resolved);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(resolved);
+  }
+
+  return output;
+}
+
+function dedupePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const output: string[] = [];
+
+  for (const inputPath of paths) {
+    const resolved = path.resolve(inputPath);
+    const key = toCanonicalPathKey(resolved);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(resolved);
+  }
+
+  return output;
+}
+
+function throwCleanupError(error: unknown): never {
+  if (error instanceof CleanupApprovalStoreError) {
+    if (error.code === 'missing') {
+      throw new Error(tMain('error.cleanupApprovalMissing'));
+    }
+    if (error.code === 'expired') {
+      throw new Error(tMain('error.cleanupApprovalExpired'));
+    }
+    if (error.code === 'rootPathNotAllowed') {
+      throw new Error(tMain('error.cleanupRootPathNotAllowed', { path: error.targetPath ?? '' }));
+    }
+    throw new Error(tMain('error.cleanupPathOutOfScope', { path: error.targetPath ?? '' }));
+  }
+
+  if (error instanceof CleanupPolicyError) {
+    if (error.code === 'rootPathNotAllowed') {
+      throw new Error(tMain('error.cleanupRootPathNotAllowed', { path: error.targetPath }));
+    }
+    throw new Error(tMain('error.cleanupPathOutOfScope', { path: error.targetPath }));
+  }
+
+  throw error;
+}
+
+function validatePreviewPaths(requestedPaths: string[]): string[] {
+  const registeredRoots = collectRegisteredRoots(settings);
+  const registeredKeys = new Set(registeredRoots.map((rootPath) => toCanonicalPathKey(rootPath)));
+
+  for (const requestedPath of requestedPaths) {
+    if (isRootPath(requestedPath)) {
+      throw new Error(tMain('error.cleanupRootPathNotAllowed', { path: requestedPath }));
+    }
+
+    const key = toCanonicalPathKey(requestedPath);
+    if (!registeredKeys.has(key)) {
+      throw new Error(tMain('error.cleanupPreviewPathUnregistered', { path: requestedPath }));
+    }
+  }
+
+  return requestedPaths;
+}
+
+async function runCleanupRescan(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+
+  try {
+    await watchEngine.runManual(paths);
+  } catch (error) {
+    appendDebugLog('cleanup.rescan.failed', error);
+  }
+}
+
+async function runDeleteWithWatchCoordination(
+  selectedPaths: string[],
+  runDelete: () => Promise<CleanupConfirmResult>
+): Promise<CleanupConfirmResult> {
+  const status = watchEngine.getStatus();
+  const wasRunning = status.running;
+
+  if (!wasRunning) {
+    const result = await runDelete();
+    await runCleanupRescan(selectedPaths);
+    return result;
+  }
+
+  await watchEngine.stop();
+
+  try {
+    const result = await runDelete();
+    await runCleanupRescan(selectedPaths);
+    return result;
+  } finally {
+    try {
+      await watchEngine.start();
+    } catch (error) {
+      appendDebugLog('cleanup.watch.restart.failed', error);
+    }
+  }
+}
+
 function registerIpcHandlers(): void {
   ipcMain.handle('settings.get', async () => settings);
 
@@ -368,8 +488,13 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle('cleanup.preview', async (_event, paths?: string[]) => {
-    const targets = paths && paths.length > 0
-      ? paths.map((targetPath, index) => ({ id: `preview-${index}`, path: targetPath }))
+    const requestedPaths = normalizeInputPaths(paths);
+    const manualPaths = requestedPaths.length > 0
+      ? validatePreviewPaths(requestedPaths)
+      : [];
+
+    const targets = manualPaths.length > 0
+      ? manualPaths.map((targetPath, index) => ({ id: `preview-${index}`, path: targetPath }))
       : settings.watchTargets
           .filter((target) => target.enabled)
           .map((target) => ({
@@ -379,60 +504,74 @@ function registerIpcHandlers(): void {
             exclude: target.exclude,
           }));
 
+    const allowedRoots = manualPaths.length > 0
+      ? manualPaths
+      : dedupePaths(targets.map((target) => target.path));
+
+    for (const allowedRoot of allowedRoots) {
+      if (isRootPath(allowedRoot)) {
+        throw new Error(tMain('error.cleanupRootPathNotAllowed', { path: allowedRoot }));
+      }
+    }
+
     const scanResult = await runScan({
       source: 'manual',
       targets,
     });
 
-    const directories = scanResult.targets.flatMap((target) => target.directories);
+    const directories = dedupeFoundDirectories(
+      scanResult.targets.flatMap((target) => target.directories)
+    );
 
-    const approval: CleanupApproval = {
-      id: randomUUID(),
-      createdAt: new Date().toISOString(),
+    const preview = cleanupApprovalStore.createPreview({
       directories,
-    };
-
-    cleanupApprovals.set(approval.id, approval);
-
-    const preview: CleanupPreview = {
-      approvalId: approval.id,
-      createdAt: approval.createdAt,
-      directories,
-      totalSize: directories.reduce((sum, dir) => sum + dir.size, 0),
-    };
+      allowedRoots,
+    });
 
     return preview;
   });
 
   ipcMain.handle('cleanup.confirmDelete', async (_event, approvalId: string, selectedPaths: string[]) => {
-    const approval = cleanupApprovals.get(approvalId);
-    if (!approval) {
-      throw new Error(tMain('error.cleanupApprovalMissing'));
+    try {
+      const selection = cleanupApprovalStore.confirmSelection(approvalId, selectedPaths);
+      for (const directory of selection.selectedDirectories) {
+        assertPathWithinAllowedRoots(directory.path, selection.allowedRoots);
+      }
+
+      return await runDeleteWithWatchCoordination(selection.allowedRoots, async () => {
+        const results = await deleteDirectories(selection.selectedDirectories);
+        const retryPreview = cleanupApprovalStore.applyDeleteResults(approvalId, results);
+
+        const failures = results
+          .filter((result) => !result.success)
+          .map((result) => ({ path: result.path, error: result.error ?? tMain('error.unknownCleanup') }));
+
+        const successPathKeys = new Set(
+          results
+            .filter((result) => result.success)
+            .map((result) => toCanonicalPathKey(result.path))
+        );
+        const deletedCount = successPathKeys.size;
+        const freedSize = selection.selectedDirectories
+          .filter((directory) => successPathKeys.has(toCanonicalPathKey(directory.path)))
+          .reduce((sum, directory) => sum + directory.size, 0);
+
+        const response: CleanupConfirmResult = {
+          deletedCount,
+          freedSize,
+          failures,
+          retryPreview: retryPreview ?? undefined,
+        };
+
+        return response;
+      });
+    } catch (error) {
+      throwCleanupError(error);
     }
+  });
 
-    const selectedSet = new Set(selectedPaths);
-    const selected = approval.directories.filter((dir) => selectedSet.has(dir.path));
-
-    const results = await deleteDirectories(selected);
-    const failures = results
-      .filter((result) => !result.success)
-      .map((result) => ({ path: result.path, error: result.error ?? tMain('error.unknownCleanup') }));
-
-    const deletedCount = results.filter((result) => result.success).length;
-    const successPaths = new Set(results.filter((result) => result.success).map((result) => result.path));
-    const freedSize = selected
-      .filter((dir) => successPaths.has(dir.path))
-      .reduce((sum, dir) => sum + dir.size, 0);
-
-    cleanupApprovals.delete(approvalId);
-
-    const response: CleanupConfirmResult = {
-      deletedCount,
-      freedSize,
-      failures,
-    };
-
-    return response;
+  ipcMain.handle('cleanup.cancel', async (_event, approvalId: string) => {
+    cleanupApprovalStore.cancel(approvalId);
   });
 }
 
@@ -470,6 +609,7 @@ async function bootstrap(): Promise<void> {
 
     settingsStore = new SettingsStore(app.getPath('userData'));
     alertManager = new AlertManager(app.getPath('userData'));
+    cleanupApprovalStore = new CleanupApprovalStore({ ttlMs: CLEANUP_APPROVAL_TTL_MS });
     settings = await settingsStore.load();
     appendDebugLog('bootstrap.settings-loaded', {
       watchTargetCount: settings.watchTargets.length,
@@ -512,6 +652,14 @@ async function bootstrap(): Promise<void> {
     ensureTray();
     appendDebugLog('bootstrap.tray-ready');
 
+    cleanupSweepTimer = setInterval(() => {
+      const removedCount = cleanupApprovalStore.pruneExpired();
+      if (removedCount > 0) {
+        appendDebugLog('cleanup.approvals.pruned', { removedCount });
+      }
+    }, CLEANUP_APPROVAL_SWEEP_INTERVAL_MS);
+    cleanupSweepTimer.unref?.();
+
     registerIpcHandlers();
     appendDebugLog('bootstrap.ipc-registered');
     mainWindow = createWindow({ launchToTray });
@@ -534,6 +682,10 @@ async function bootstrap(): Promise<void> {
 
     app.on('before-quit', () => {
       quitting = true;
+      if (cleanupSweepTimer) {
+        clearInterval(cleanupSweepTimer);
+        cleanupSweepTimer = undefined;
+      }
       appendDebugLog('app.before-quit');
     });
 

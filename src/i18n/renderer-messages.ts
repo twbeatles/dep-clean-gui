@@ -23,6 +23,7 @@ const EN_MESSAGES = {
   'pagination.pageOf': '{current} / {total}',
   'cleanup.title': 'Confirm Cleanup',
   'cleanup.previewCreatedAt': 'Generated at: {value}',
+  'cleanup.previewExpiresAt': 'Expires at: {value}',
   'cleanup.selectedSummary':
     '{selected} of {total} selected · {size} will be freed',
   'cleanup.selectAll': 'Select all',
@@ -39,7 +40,12 @@ const EN_MESSAGES = {
   'message.noNewFolders': 'No new folders were added.',
   'message.cleanupPreviewGenerated': 'Cleanup list ready. Review and confirm.',
   'message.cleanupComplete': 'Cleaned up {count} folders · freed {size}',
+  'message.cleanupRetryPending':
+    '{count} item(s) failed. Review remaining items and retry.',
   'error.someDeletesFailed': '{count} item(s) could not be deleted.',
+  'error.cleanupApprovalExpired': 'Cleanup approval expired. Recreate preview.',
+  'error.cleanupPathOutOfScope': 'Selected path is outside approved scope.',
+  'error.cleanupPreviewPathUnregistered': 'Preview path is not a registered target.',
   'message.startupAutoStartEnabled': 'Launch at login enabled.',
   'message.startupAutoStartDisabled':
     'Launch at login disabled. You can change this anytime in Settings.',
@@ -109,6 +115,7 @@ const KO_MESSAGES = {
   'pagination.pageOf': '{current} / {total}',
   'cleanup.title': '정리 확인',
   'cleanup.previewCreatedAt': '생성 시각: {value}',
+  'cleanup.previewExpiresAt': '만료 시각: {value}',
   'cleanup.selectedSummary':
     '{total}개 중 {selected}개 선택 · {size} 확보 예정',
   'cleanup.selectAll': '전체 선택',
@@ -125,7 +132,12 @@ const KO_MESSAGES = {
   'message.noNewFolders': '추가할 새 폴더가 없습니다.',
   'message.cleanupPreviewGenerated': '정리 목록이 준비되었습니다. 검토 후 확인하세요.',
   'message.cleanupComplete': '{count}개 폴더 정리 완료 · {size} 확보',
+  'message.cleanupRetryPending':
+    '{count}개 항목이 실패했습니다. 남은 항목을 검토 후 재시도하세요.',
   'error.someDeletesFailed': '{count}개 항목을 삭제하지 못했습니다.',
+  'error.cleanupApprovalExpired': '삭제 승인이 만료되었습니다. 미리보기를 다시 생성하세요.',
+  'error.cleanupPathOutOfScope': '선택된 경로가 승인 범위를 벗어났습니다.',
+  'error.cleanupPreviewPathUnregistered': '미리보기 경로가 등록된 대상이 아닙니다.',
   'message.startupAutoStartEnabled': '로그인 시 자동 시작이 설정되었습니다.',
   'message.startupAutoStartDisabled': '자동 시작이 비활성화되었습니다. 설정에서 언제든 변경할 수 있습니다.',
   'loading.initializing': '시작하는 중…',

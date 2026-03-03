@@ -39,7 +39,7 @@ This file mirrors `cladue.md` but is formatted for another AI workflow.
 - Settings: `src/config.ts`, `src/settings-store.ts`
 - Alerts: `src/alert-manager.ts`
 - Launch decision: `src/electron-launch-mode.ts`
-- Electron shell: `electron/main.ts`, `electron/preload.ts`
+- Electron shell: `electron/main.ts`, `electron/preload.cts`
 - Renderer app: `gui/src/App.tsx`
 - Release workflow: `.github/workflows/release-windows.yml`
 
@@ -85,6 +85,26 @@ This file mirrors `cladue.md` but is formatted for another AI workflow.
   - OS notification strings
   - folder picker dialog title
 - Startup diagnostics log remains `%TEMP%/dep-clean-gui-startup.log`.
+
+## Cleanup Hardening Snapshot (2026-03-03)
+
+- Approval lifecycle now has explicit expiry:
+  - TTL: 15 minutes
+  - background prune cadence: 60 seconds
+- Cleanup bridge/API updates:
+  - `cleanup.cancel(approvalId)` added
+  - `CleanupPreview` includes `expiresAt`
+  - `cleanup.confirmDelete(...)` can return `retryPreview` for partial-failure retry
+- Safety and scope policy:
+  - preview paths must be registered targets (`watchTargets` + `scanSets`)
+  - selected delete paths are revalidated against approved roots
+  - root paths are rejected
+- Deletion semantics improved:
+  - removed `rm(..., force: true)`
+  - `lstat` pre-check before delete
+  - retries for transient delete errors (`EPERM`, `EBUSY`, `ENOTEMPTY`)
+- Monitor coordination:
+  - cleanup now runs as `watch stop -> delete -> single manual rescan -> watch start` when monitor is active
 
 ## Test Expectations
 

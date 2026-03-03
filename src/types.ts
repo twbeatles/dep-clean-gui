@@ -118,6 +118,7 @@ export interface ScanProgressEvent {
 export interface CleanupPreview {
   approvalId: string;
   createdAt: string;
+  expiresAt: string;
   directories: FoundDirectory[];
   totalSize: number;
 }
@@ -131,6 +132,7 @@ export interface CleanupConfirmResult {
   deletedCount: number;
   freedSize: number;
   failures: CleanupFailure[];
+  retryPreview?: CleanupPreview;
 }
 
 export interface ScanExecutionOutcome {

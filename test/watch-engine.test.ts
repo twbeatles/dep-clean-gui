@@ -129,4 +129,42 @@ describe('WatchEngine', () => {
 
     await engine.stop();
   });
+
+  it('recovers watcher state after stop and restart', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-watch-restart-'));
+    tempRoots.push(root);
+
+    const watchPath = path.join(root, 'watch');
+    mkdirSync(watchPath, { recursive: true });
+
+    const settings = createDefaultSettings();
+    settings.periodicEnabled = false;
+    settings.realtimeEnabled = true;
+    settings.watchTargets = [
+      {
+        id: 'target-1',
+        path: watchPath,
+        enabled: true,
+      },
+    ];
+
+    const engine = new WatchEngine(settings, new AlertManager(root));
+
+    await engine.start();
+    const started = engine.getStatus();
+    assert.equal(started.running, true);
+    assert.equal(started.watcherCount > 0, true);
+
+    await engine.stop();
+    const stopped = engine.getStatus();
+    assert.equal(stopped.running, false);
+    assert.equal(stopped.watcherCount, 0);
+
+    await engine.start();
+    const restarted = engine.getStatus();
+    assert.equal(restarted.running, true);
+    assert.equal(restarted.watcherCount > 0, true);
+
+    await engine.stop();
+  });
 });

@@ -53,6 +53,9 @@ Problems addressed in this fork:
 ### FR-5 Approval Cleanup
 - Preview first, then confirm delete.
 - Partial failure reporting.
+- Approval is time-bounded (TTL) and can be explicitly canceled.
+- Cleanup preview/delete must stay within approved roots.
+- Partial failures must support retry without rebuilding the entire preview.
 
 ### FR-6 CLI Compatibility
 - Preserve CLI options and behavior.
@@ -102,17 +105,23 @@ Core flow:
 - `CleanupPreview`
 - `CleanupConfirmResult`
 
+Cleanup model requirements:
+- `CleanupPreview` includes `expiresAt`.
+- `CleanupConfirmResult` may include `retryPreview` for failed-path retry UX.
+
 ## 8. IPC / API
 - Settings: `settings.get`, `settings.update`
 - Scan: `scan.runManual`, `scan.runSet`, `scan.getLastResult`, progress/completed events
 - Watch: `watch.start`, `watch.stop`, `watch.status`, status-changed event
 - Alerts: `alerts.list`, `alerts.markRead`, `alerts.clear`, created event
-- Cleanup: `cleanup.preview`, `cleanup.confirmDelete`
+- Cleanup: `cleanup.preview`, `cleanup.confirmDelete`, `cleanup.cancel`
 - Folder picker: `folders.pick`
 
 ## 9. Error Handling
 - Permission-denied directories are skipped in scan.
 - Missing cleanup approval token returns explicit error.
+- Expired cleanup approvals return explicit error.
+- Cleanup path-out-of-scope and root-path requests are rejected.
 - Partial delete failures are returned per path.
 - OS feature gaps (notification/login item) use graceful fallback.
 
@@ -122,6 +131,9 @@ Core flow:
 - Alert lifecycle and cooldown
 - Settings normalization and migration
 - Launch mode decision (`--launch-tray`, login startup)
+- Cleanup policy guardrails (dedupe/root/out-of-scope/registered roots)
+- Cleanup approval lifecycle (TTL/cancel/retry preview)
+- Cleaner retry + missing-path semantics
 
 ### Acceptance
 - First launch startup choice appears once
@@ -206,3 +218,29 @@ Core flow:
   - CLI surface/flags
   - tray-resident lifecycle policy
   - approval-first cleanup flow
+
+## 18. Cleanup Hardening Update (2026-03-03)
+
+- New cleanup path policy module:
+  - canonical path dedupe
+  - root-path blocking
+  - approved-root scope enforcement
+  - registered-root collection from `watchTargets + scanSets`
+- New cleanup approval store:
+  - TTL-based approval lifecycle (15 minutes)
+  - background expiry sweep (60 seconds)
+  - explicit cancel support
+  - partial-failure retry state (`retryPreview`)
+- Cleaner behavior updates:
+  - removed force-delete semantics (`force: true`)
+  - lstat pre-check before delete
+  - retry for transient delete errors (`EPERM`, `EBUSY`, `ENOTEMPTY`)
+  - missing path is treated as explicit failure signal, not silent success
+- Runtime coordination updates:
+  - when watch mode is running, cleanup is serialized as:
+    - `watch.stop -> delete -> one manual rescan -> watch.start`
+- Added tests:
+  - `test/cleanup-policy.test.ts`
+  - `test/cleanup-approval-store.test.ts`
+  - `test/cleaner.test.ts`
+  - watch stop/start recovery case in `test/watch-engine.test.ts`

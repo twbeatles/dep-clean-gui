@@ -88,6 +88,27 @@ dep-clean --exclude vendor,Pods
 - `alerts.list(options?: { limit?: number })` now supports optional `limit`.
 - Calling `alerts.list()` without options keeps existing behavior.
 
+## Cleanup Hardening Update (2026-03-03)
+
+- Cleanup preview now deduplicates directories by canonical path to prevent over-counted deletion metrics.
+- Cleanup approvals are now time-bounded:
+  - approval TTL: `15 minutes`
+  - expired approvals are pruned in the background (`60s` sweep)
+- New cleanup IPC/API behavior:
+  - `cleanup.cancel(approvalId)` added
+  - `CleanupPreview` includes `expiresAt`
+  - `cleanup.confirmDelete(...)` may return `retryPreview` when partial failures remain
+- Cleanup scope safety is enforced:
+  - preview paths must be registered roots (`watchTargets` + `scanSets`)
+  - selected delete paths must remain inside approved roots
+  - root paths are rejected
+- Deletion engine now prioritizes result accuracy:
+  - `rm(..., force: true)` removed
+  - pre-check via `lstat`
+  - retry for transient filesystem errors (`EPERM`, `EBUSY`, `ENOTEMPTY`)
+- Cleanup and watcher runs are coordinated to reduce I/O contention:
+  - when monitor is running, cleanup uses `stop -> delete -> one rescan -> start`
+
 ## Windows Packaging Bridge Stability
 
 - Preload is compiled as CommonJS (`dist/electron/preload.cjs`) for packaged builds.

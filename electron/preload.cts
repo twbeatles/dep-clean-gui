@@ -46,6 +46,7 @@ const api: DepCleanApi = {
     preview: (paths) => ipcRenderer.invoke('cleanup.preview', paths),
     confirmDelete: (approvalId, selectedPaths) =>
       ipcRenderer.invoke('cleanup.confirmDelete', approvalId, selectedPaths),
+    cancel: (approvalId) => ipcRenderer.invoke('cleanup.cancel', approvalId),
   },
   folders: {
     pickMany: () => ipcRenderer.invoke('folders.pick'),

@@ -88,6 +88,27 @@ dep-clean --exclude vendor,Pods
 - `alerts.list(options?: { limit?: number })`에 선택적 `limit` 인자를 추가했습니다.
 - 옵션 없이 `alerts.list()`를 호출하면 기존 동작과 동일합니다.
 
+## 정리(Cleanup) 안정성 강화 업데이트 (2026-03-03)
+
+- 정리 미리보기는 canonical path 기준 중복 제거를 적용하여 삭제 건수/확보 용량 과대 집계를 방지합니다.
+- 삭제 승인(approval)에 수명 정책을 추가했습니다.
+  - TTL: `15분`
+  - 백그라운드 만료 정리 주기: `60초`
+- 정리 IPC/API가 확장되었습니다.
+  - `cleanup.cancel(approvalId)` 추가
+  - `CleanupPreview`에 `expiresAt` 포함
+  - `cleanup.confirmDelete(...)`는 부분 실패가 남으면 `retryPreview`를 반환
+- 정리 경로 안전 가드를 적용했습니다.
+  - preview 입력 경로는 등록 루트(`watchTargets` + `scanSets`)만 허용
+  - 실제 삭제 선택 경로는 승인된 루트 하위만 허용
+  - 루트 경로는 정리 대상으로 거부
+- 삭제 엔진 정확도를 강화했습니다.
+  - `rm(..., force: true)` 제거
+  - `lstat` 선검증
+  - 일시적 파일 시스템 오류(`EPERM`, `EBUSY`, `ENOTEMPTY`) 재시도
+- 모니터링과 정리 작업 경합을 줄이기 위해 실행을 직렬화했습니다.
+  - 모니터링 중 정리 시 `stop -> delete -> 1회 rescan -> start`
+
 ## Windows 패키징 브리지 안정성
 
 - 패키징 실행 시 preload는 CommonJS(`dist/electron/preload.cjs`)로 빌드됩니다.

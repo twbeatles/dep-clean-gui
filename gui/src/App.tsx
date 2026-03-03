@@ -325,6 +325,7 @@ const CleanupPreviewModal = memo(function CleanupPreviewModal({
       <div className="modal">
         <h2>{t('cleanup.title')}</h2>
         <p>{t('cleanup.previewCreatedAt', { value: timestampText(preview.createdAt) })}</p>
+        <p>{t('cleanup.previewExpiresAt', { value: timestampText(preview.expiresAt) })}</p>
 
         <div className="modal-summary">
           {t('cleanup.selectedSummary', {
@@ -335,10 +336,10 @@ const CleanupPreviewModal = memo(function CleanupPreviewModal({
         </div>
 
         <div className="modal-actions">
-          <button className="btn" onClick={onSelectAll}>
+          <button className="btn" disabled={busy} onClick={onSelectAll}>
             {t('cleanup.selectAll')}
           </button>
-          <button className="btn" onClick={onClearAll}>
+          <button className="btn" disabled={busy} onClick={onClearAll}>
             {t('cleanup.clearAll')}
           </button>
         </div>
@@ -349,6 +350,7 @@ const CleanupPreviewModal = memo(function CleanupPreviewModal({
               <input
                 type="checkbox"
                 checked={selectedDeletePaths.has(dir.path)}
+                disabled={busy}
                 onChange={(event) => onTogglePath(dir.path, event.target.checked)}
               />
               <code>{dir.path}</code>
@@ -370,7 +372,7 @@ const CleanupPreviewModal = memo(function CleanupPreviewModal({
         )}
 
         <div className="modal-actions">
-          <button className="btn" onClick={onCancel}>
+          <button className="btn" disabled={busy} onClick={onCancel}>
             {t('cleanup.cancel')}
           </button>
           <button className="btn danger" disabled={selectedDeletePaths.size === 0 || busy} onClick={onConfirm}>
@@ -694,11 +696,28 @@ export default function App() {
     try {
       await flushPendingSettings();
       setBusy(true);
+      if (preview) {
+        await window.depClean.cleanup.cancel(preview.approvalId);
+      }
       const nextPreview = await window.depClean.cleanup.preview(paths ?? selectedSet?.paths);
       setPreview(nextPreview);
       setSelectedDeletePaths(new Set(nextPreview.directories.map((dir) => dir.path)));
       setMessage(t('message.cleanupPreviewGenerated'));
       setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function cancelCleanupPreview() {
+    if (!preview) return;
+    try {
+      setBusy(true);
+      await window.depClean.cleanup.cancel(preview.approvalId);
+      setPreview(null);
+      setSelectedDeletePaths(new Set());
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -714,18 +733,25 @@ export default function App() {
         preview.approvalId,
         Array.from(selectedDeletePaths)
       );
-      setPreview(null);
-      setSelectedDeletePaths(new Set());
       setMessage(t('message.cleanupComplete', {
         count: result.deletedCount,
         size: bytesToText(result.freedSize),
       }));
-      if (result.failures.length > 0) {
-        setErrorMessage(t('error.someDeletesFailed', { count: result.failures.length }));
+
+      if (result.retryPreview) {
+        setPreview(result.retryPreview);
+        setSelectedDeletePaths(new Set(result.retryPreview.directories.map((dir) => dir.path)));
+        setErrorMessage(t('message.cleanupRetryPending', { count: result.failures.length }));
       } else {
+        setPreview(null);
+        setSelectedDeletePaths(new Set());
+      }
+
+      if (result.failures.length > 0 && !result.retryPreview) {
+        setErrorMessage(t('error.someDeletesFailed', { count: result.failures.length }));
+      } else if (result.failures.length === 0) {
         setErrorMessage('');
       }
-      await runManualScan(selectedSet?.paths);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
@@ -1227,7 +1253,7 @@ export default function App() {
           }}
           onPreviousPage={() => setPreviewPage((page) => page - 1)}
           onNextPage={() => setPreviewPage((page) => page + 1)}
-          onCancel={() => setPreview(null)}
+          onCancel={() => void cancelCleanupPreview()}
           onConfirm={() => void confirmCleanup()}
         />
       )}
