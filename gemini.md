@@ -43,6 +43,43 @@ This file mirrors `cladue.md` but is formatted for another AI workflow.
 - Renderer app: `gui/src/App.tsx`
 - Release workflow: `.github/workflows/release-windows.yml`
 
+## Performance Refactor Snapshot (2026-03)
+
+- Scanner pipeline:
+  - iterative traversal instead of recursive DFS
+  - bounded stat concurrency for file-size aggregation
+  - path-like target matching (`vendor/bundle` etc.)
+- Scan orchestration:
+  - bounded multi-target parallelism (`TARGET_SCAN_CONCURRENCY=2`)
+- Watch engine:
+  - diff-based settings application
+  - watcher rebuild only on realtime/watch-target changes
+  - realtime burst coalescing
+- Settings persistence:
+  - in-memory cache + no-op write skip
+  - single-write update flow
+- Alerts:
+  - `alerts.list({ limit })` IPC support
+  - capped history retention (`ALERT_HISTORY_MAX=5000`)
+- Renderer:
+  - debounced settings update (`SETTINGS_COMMIT_DEBOUNCE_MS=400`)
+  - cleanup selection state uses `Set`
+  - pagination for alerts and cleanup preview (`PAGE_SIZE=200`)
+
+## Windows Preload + i18n Snapshot (2026-03)
+
+- Packaged preload now runs as CommonJS (`dist/electron/preload.cjs`) to avoid Electron sandbox preload parse errors.
+- Main process preload target is explicitly `preload.cjs`.
+- Locale selection is automatic:
+  - `ko*` => Korean
+  - otherwise English
+- Localization coverage:
+  - renderer strings
+  - tray menu labels
+  - OS notification strings
+  - folder picker dialog title
+- Startup diagnostics log remains `%TEMP%/dep-clean-gui-startup.log`.
+
 ## Test Expectations
 
 - Unit tests should cover:

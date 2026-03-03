@@ -1,5 +1,6 @@
-import { contextBridge, ipcRenderer } from 'electron';
 import type { DepCleanApi } from '../src/ipc-types.js';
+
+const { contextBridge, ipcRenderer } = require('electron') as typeof import('electron');
 
 const api: DepCleanApi = {
   settings: {
@@ -32,7 +33,7 @@ const api: DepCleanApi = {
     },
   },
   alerts: {
-    list: () => ipcRenderer.invoke('alerts.list'),
+    list: (options) => ipcRenderer.invoke('alerts.list', options),
     markRead: (ids) => ipcRenderer.invoke('alerts.markRead', ids),
     clear: () => ipcRenderer.invoke('alerts.clear'),
     onCreated: (listener) => {

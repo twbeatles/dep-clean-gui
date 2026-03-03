@@ -1,4 +1,10 @@
-﻿import { useEffect, useMemo, useState } from 'react';
+﻿import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { normalizeSupportedLocale } from '../../src/i18n/locale';
+import {
+  createRendererTranslator,
+  type RendererTranslator,
+} from '../../src/i18n/renderer-messages';
+import type { DepCleanApi } from '../../src/ipc-types';
 import type {
   AppScanResult,
   AppSettings,
@@ -14,12 +20,10 @@ import './styles/app.css';
 
 type TabKey = 'dashboard' | 'scanSets' | 'settings' | 'alerts';
 
-const TAB_LABELS: Array<{ key: TabKey; label: string }> = [
-  { key: 'dashboard', label: 'Dashboard' },
-  { key: 'scanSets', label: 'Scan Sets' },
-  { key: 'settings', label: 'Settings' },
-  { key: 'alerts', label: 'Alert History' },
-];
+const SETTINGS_COMMIT_DEBOUNCE_MS = 400;
+const PREVIEW_PAGE_SIZE = 200;
+const ALERT_PAGE_SIZE = 200;
+const ALERT_HISTORY_MAX = 5000;
 
 function bytesToText(bytes: number): string {
   if (bytes <= 0) return '0 B';
@@ -49,16 +53,254 @@ function createTarget(targetPath: string): WatchTarget {
   };
 }
 
-function buildSetName(paths: string[]): string {
+function buildSetName(paths: string[], t: RendererTranslator): string {
   if (paths.length === 1) {
     const tokens = paths[0].split(/[/\\]/g).filter(Boolean);
-    return `Set: ${tokens[tokens.length - 1] ?? 'scan'}`;
+    return t('setName.single', { name: tokens[tokens.length - 1] ?? 'scan' });
   }
 
-  return `Set: ${paths.length} folders (${new Date().toLocaleDateString()})`;
+  return t('setName.multiple', {
+    count: paths.length,
+    date: new Date().toLocaleDateString(),
+  });
 }
 
+function mergeSettingsPatch(
+  current: Partial<AppSettings>,
+  patch: Partial<AppSettings>
+): Partial<AppSettings> {
+  return {
+    ...current,
+    ...patch,
+    watchTargets: patch.watchTargets ?? current.watchTargets,
+    scanSets: patch.scanSets ?? current.scanSets,
+  };
+}
+
+function applySettingsPatch(
+  current: AppSettings | null,
+  patch: Partial<AppSettings>
+): AppSettings | null {
+  if (!current) return current;
+  return {
+    ...current,
+    ...patch,
+    watchTargets: patch.watchTargets ?? current.watchTargets,
+    scanSets: patch.scanSets ?? current.scanSets,
+  };
+}
+
+function getDepCleanApi(): DepCleanApi | null {
+  const api = (window as unknown as { depClean?: DepCleanApi }).depClean;
+  return api ?? null;
+}
+
+interface StartupChoiceModalProps {
+  busy: boolean;
+  t: RendererTranslator;
+  onEnableAutoStart: () => void;
+  onDecideLater: () => void;
+}
+
+const StartupChoiceModal = memo(function StartupChoiceModal({
+  busy,
+  t,
+  onEnableAutoStart,
+  onDecideLater,
+}: StartupChoiceModalProps) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>{t('startup.title')}</h2>
+        <p>{t('startup.description')}</p>
+        <div className="modal-actions">
+          <button className="btn primary" disabled={busy} onClick={onEnableAutoStart}>
+            {t('startup.enableAutoStart')}
+          </button>
+          <button className="btn" disabled={busy} onClick={onDecideLater}>
+            {t('startup.decideLater')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
+interface AlertsSectionProps {
+  alerts: ThresholdAlert[];
+  alertPage: number;
+  alertPageCount: number;
+  t: RendererTranslator;
+  onMarkAllRead: () => void;
+  onClearAlerts: () => void;
+  onPreviousPage: () => void;
+  onNextPage: () => void;
+}
+
+const AlertsSection = memo(function AlertsSection({
+  alerts,
+  alertPage,
+  alertPageCount,
+  t,
+  onMarkAllRead,
+  onClearAlerts,
+  onPreviousPage,
+  onNextPage,
+}: AlertsSectionProps) {
+  return (
+    <section className="panel">
+      <div className="panel-header">
+        <h2>{t('alerts.title')}</h2>
+        <div className="button-row">
+          <button className="btn" onClick={onMarkAllRead}>
+            {t('alerts.markAllRead')}
+          </button>
+          <button className="btn danger" onClick={onClearAlerts}>
+            {t('alerts.clearHistory')}
+          </button>
+        </div>
+      </div>
+
+      <div className="alert-list">
+        {alerts.map((alert) => (
+          <article key={alert.id} className={alert.read ? 'alert-card read' : 'alert-card'}>
+            <header>
+              <strong>
+                {alert.status === 'exceeded'
+                  ? t('alerts.status.exceeded')
+                  : t('alerts.status.resolved')}
+              </strong>
+              <span>{alert.scope === 'global' ? t('alerts.scope.global') : alert.targetPath ?? alert.targetId}</span>
+            </header>
+            <p>
+              {bytesToText(alert.currentBytes)} {t('alerts.thresholdLabel', { value: bytesToText(alert.thresholdBytes) })}
+            </p>
+            <time>{timestampText(alert.timestamp)}</time>
+          </article>
+        ))}
+      </div>
+
+      <div className="button-row">
+        <button className="btn" disabled={alertPage <= 1} onClick={onPreviousPage}>
+          {t('pagination.previous')}
+        </button>
+        <span className="muted">{t('pagination.pageOf', { current: alertPage, total: alertPageCount })}</span>
+        <button className="btn" disabled={alertPage >= alertPageCount} onClick={onNextPage}>
+          {t('pagination.next')}
+        </button>
+      </div>
+    </section>
+  );
+});
+
+interface CleanupPreviewModalProps {
+  preview: CleanupPreview;
+  busy: boolean;
+  selectedDeletePaths: Set<string>;
+  selectedPreviewSize: number;
+  previewPage: number;
+  previewPageCount: number;
+  pagedPreviewDirectories: CleanupPreview['directories'];
+  t: RendererTranslator;
+  onSelectAll: () => void;
+  onClearAll: () => void;
+  onTogglePath: (dirPath: string, checked: boolean) => void;
+  onPreviousPage: () => void;
+  onNextPage: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+const CleanupPreviewModal = memo(function CleanupPreviewModal({
+  preview,
+  busy,
+  selectedDeletePaths,
+  selectedPreviewSize,
+  previewPage,
+  previewPageCount,
+  pagedPreviewDirectories,
+  t,
+  onSelectAll,
+  onClearAll,
+  onTogglePath,
+  onPreviousPage,
+  onNextPage,
+  onCancel,
+  onConfirm,
+}: CleanupPreviewModalProps) {
+  return (
+    <div className="modal-backdrop">
+      <div className="modal">
+        <h2>{t('cleanup.title')}</h2>
+        <p>{t('cleanup.previewCreatedAt', { value: timestampText(preview.createdAt) })}</p>
+        <p>
+          {t('cleanup.selectedSummary', {
+            selected: selectedDeletePaths.size,
+            total: preview.directories.length,
+            size: bytesToText(selectedPreviewSize),
+          })}
+        </p>
+
+        <div className="modal-actions">
+          <button className="btn" onClick={onSelectAll}>
+            {t('cleanup.selectAll')}
+          </button>
+          <button className="btn" onClick={onClearAll}>
+            {t('cleanup.clearAll')}
+          </button>
+        </div>
+
+        <div className="modal-list">
+          {pagedPreviewDirectories.map((dir) => (
+            <label key={dir.path}>
+              <input
+                type="checkbox"
+                checked={selectedDeletePaths.has(dir.path)}
+                onChange={(event) => onTogglePath(dir.path, event.target.checked)}
+              />
+              <code>{dir.path}</code>
+              <span>{bytesToText(dir.size)}</span>
+            </label>
+          ))}
+        </div>
+
+        <div className="button-row">
+          <button className="btn" disabled={previewPage <= 1} onClick={onPreviousPage}>
+            {t('pagination.previous')}
+          </button>
+          <span className="muted">{t('pagination.pageOf', { current: previewPage, total: previewPageCount })}</span>
+          <button className="btn" disabled={previewPage >= previewPageCount} onClick={onNextPage}>
+            {t('pagination.next')}
+          </button>
+        </div>
+
+        <div className="modal-actions">
+          <button className="btn" onClick={onCancel}>
+            {t('cleanup.cancel')}
+          </button>
+          <button className="btn danger" disabled={selectedDeletePaths.size === 0 || busy} onClick={onConfirm}>
+            {t('cleanup.confirmDeleteSelected')}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+});
+
 export default function App() {
+  const locale = useMemo(() => normalizeSupportedLocale(navigator.language), []);
+  const t = useMemo(() => createRendererTranslator(locale), [locale]);
+
+  const tabLabels = useMemo(
+    () => [
+      { key: 'dashboard' as const, label: t('tab.dashboard') },
+      { key: 'scanSets' as const, label: t('tab.scanSets') },
+      { key: 'settings' as const, label: t('tab.settings') },
+      { key: 'alerts' as const, label: t('tab.alerts') },
+    ],
+    [t]
+  );
+
   const [activeTab, setActiveTab] = useState<TabKey>('dashboard');
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [watchStatus, setWatchStatus] = useState<WatchStatus | null>(null);
@@ -69,11 +311,16 @@ export default function App() {
   const [selectedSetId, setSelectedSetId] = useState<string>('');
   const [newSetName, setNewSetName] = useState('');
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
-  const [selectedDeletePaths, setSelectedDeletePaths] = useState<string[]>([]);
+  const [selectedDeletePaths, setSelectedDeletePaths] = useState<Set<string>>(new Set<string>());
   const [showStartupChoiceModal, setShowStartupChoiceModal] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [alertPage, setAlertPage] = useState(1);
+  const [previewPage, setPreviewPage] = useState(1);
+
+  const settingsCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pendingSettingsPatchRef = useRef<Partial<AppSettings>>({});
 
   const selectedSet = useMemo(
     () => settings?.scanSets.find((scanSet) => scanSet.id === selectedSetId) ?? null,
@@ -82,17 +329,89 @@ export default function App() {
 
   const selectedPreviewSize = useMemo(() => {
     if (!preview) return 0;
-    const picked = new Set(selectedDeletePaths);
-    return preview.directories.filter((dir) => picked.has(dir.path)).reduce((sum, dir) => sum + dir.size, 0);
+    return preview.directories
+      .filter((dir) => selectedDeletePaths.has(dir.path))
+      .reduce((sum, dir) => sum + dir.size, 0);
   }, [preview, selectedDeletePaths]);
 
-  async function bootstrap() {
+  const alertPageCount = useMemo(() => Math.max(1, Math.ceil(alerts.length / ALERT_PAGE_SIZE)), [alerts.length]);
+
+  const pagedAlerts = useMemo(() => {
+    const alertPageStart = (alertPage - 1) * ALERT_PAGE_SIZE;
+    return alerts.slice(alertPageStart, alertPageStart + ALERT_PAGE_SIZE);
+  }, [alertPage, alerts]);
+
+  const previewPageCount = useMemo(() => {
+    if (!preview) return 1;
+    return Math.max(1, Math.ceil(preview.directories.length / PREVIEW_PAGE_SIZE));
+  }, [preview]);
+
+  const pagedPreviewDirectories = useMemo(() => {
+    if (!preview) return [];
+    const previewPageStart = (previewPage - 1) * PREVIEW_PAGE_SIZE;
+    return preview.directories.slice(previewPageStart, previewPageStart + PREVIEW_PAGE_SIZE);
+  }, [preview, previewPage]);
+
+  function clearPendingSettingsTimer(): void {
+    if (!settingsCommitTimerRef.current) return;
+    clearTimeout(settingsCommitTimerRef.current);
+    settingsCommitTimerRef.current = null;
+  }
+
+  async function commitSettings(
+    patch: Partial<AppSettings>,
+    options?: { withBusy?: boolean; successMessage?: string }
+  ): Promise<void> {
+    if (Object.keys(patch).length === 0) return;
+
+    const withBusy = options?.withBusy ?? false;
+
+    try {
+      if (withBusy) setBusy(true);
+      const next = await window.depClean.settings.update(patch);
+      setSettings(next);
+      if (options?.successMessage) {
+        setMessage(options.successMessage);
+      }
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : String(error));
+    } finally {
+      if (withBusy) setBusy(false);
+    }
+  }
+
+  async function flushPendingSettings(options?: { withBusy?: boolean; successMessage?: string }): Promise<void> {
+    clearPendingSettingsTimer();
+    const patch = pendingSettingsPatchRef.current;
+    pendingSettingsPatchRef.current = {};
+    await commitSettings(patch, options);
+  }
+
+  function queueSettingsUpdate(partial: Partial<AppSettings>): void {
+    setSettings((current) => applySettingsPatch(current, partial));
+    pendingSettingsPatchRef.current = mergeSettingsPatch(pendingSettingsPatchRef.current, partial);
+    clearPendingSettingsTimer();
+    settingsCommitTimerRef.current = setTimeout(() => {
+      void flushPendingSettings();
+    }, SETTINGS_COMMIT_DEBOUNCE_MS);
+  }
+
+  async function updateSettingsNow(
+    partial: Partial<AppSettings>,
+    successMessage = t('settings.saved')
+  ): Promise<void> {
+    await flushPendingSettings();
+    await commitSettings(partial, { withBusy: true, successMessage });
+  }
+
+  async function bootstrap(api: DepCleanApi) {
     try {
       const [nextSettings, nextStatus, nextAlerts, nextScan] = await Promise.all([
-        window.depClean.settings.get(),
-        window.depClean.watch.status(),
-        window.depClean.alerts.list(),
-        window.depClean.scan.getLastResult(),
+        api.settings.get(),
+        api.watch.status(),
+        api.alerts.list({ limit: ALERT_HISTORY_MAX }),
+        api.scan.getLastResult(),
       ]);
 
       setSettings(nextSettings);
@@ -108,26 +427,38 @@ export default function App() {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   }
+  useEffect(() => {
+    document.documentElement.lang = locale;
+  }, [locale]);
 
   useEffect(() => {
-    void bootstrap();
+    const api = getDepCleanApi();
+    if (!api) {
+      setErrorMessage(t('error.ipcUnavailable'));
+      return () => {
+        clearPendingSettingsTimer();
+      };
+    }
 
-    const unsubscribeProgress = window.depClean.scan.onProgress((event) => {
+    void bootstrap(api);
+
+    const unsubscribeProgress = api.scan.onProgress((event) => {
       setProgress(event);
     });
 
-    const unsubscribeCompleted = window.depClean.scan.onCompleted((outcome) => {
+    const unsubscribeCompleted = api.scan.onCompleted((outcome) => {
       setProgress(null);
       setLastOutcome(outcome);
       setLastScan(outcome.scanResult);
     });
 
-    const unsubscribeStatus = window.depClean.watch.onStatusChanged((status) => {
+    const unsubscribeStatus = api.watch.onStatusChanged((status) => {
       setWatchStatus(status);
     });
 
-    const unsubscribeAlerts = window.depClean.alerts.onCreated((created) => {
-      setAlerts((prev) => [...created, ...prev]);
+    const unsubscribeAlerts = api.alerts.onCreated((created) => {
+      setAlerts((prev) => [...created, ...prev].slice(0, ALERT_HISTORY_MAX));
+      setAlertPage(1);
     });
 
     return () => {
@@ -135,32 +466,41 @@ export default function App() {
       unsubscribeCompleted();
       unsubscribeStatus();
       unsubscribeAlerts();
+      clearPendingSettingsTimer();
     };
-  }, []);
+  }, [t]);
+
+  useEffect(() => {
+    setAlertPage((current) => Math.min(current, alertPageCount));
+  }, [alertPageCount]);
+
+  useEffect(() => {
+    setPreviewPage(1);
+  }, [preview?.approvalId]);
+
+  useEffect(() => {
+    setPreviewPage((current) => Math.min(current, previewPageCount));
+  }, [previewPageCount]);
 
   async function updateSettings(partial: Partial<AppSettings>) {
-    try {
-      setBusy(true);
-      const next = await window.depClean.settings.update(partial);
-      setSettings(next);
-      setMessage('Settings saved.');
-      setErrorMessage('');
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
+    await updateSettingsNow(partial);
   }
 
   async function runManualScan(paths?: string[]) {
     try {
+      await flushPendingSettings();
       setBusy(true);
       const outcome = await window.depClean.scan.runManual(paths);
       setLastOutcome(outcome);
       setLastScan(outcome.scanResult);
-      const nextAlerts = await window.depClean.alerts.list();
+      const nextAlerts = await window.depClean.alerts.list({ limit: ALERT_HISTORY_MAX });
       setAlerts(nextAlerts);
-      setMessage(`Scan complete: ${outcome.scanResult.directoryCount} folders, ${bytesToText(outcome.scanResult.totalSize)}`);
+      setMessage(
+        t('message.scanComplete', {
+          count: outcome.scanResult.directoryCount,
+          size: bytesToText(outcome.scanResult.totalSize),
+        })
+      );
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -169,15 +509,21 @@ export default function App() {
     }
   }
 
-  async function runSelectedSet() {
-    if (!selectedSet) return;
+  async function runSelectedSet(setId?: string) {
+    const targetSet = setId
+      ? settings?.scanSets.find((scanSet) => scanSet.id === setId) ?? null
+      : selectedSet;
+    if (!targetSet) return;
 
     try {
+      await flushPendingSettings();
       setBusy(true);
-      const outcome = await window.depClean.scan.runSet(selectedSet.id);
+      const outcome = await window.depClean.scan.runSet(targetSet.id);
       setLastOutcome(outcome);
       setLastScan(outcome.scanResult);
-      setMessage(`Scan set complete: ${selectedSet.name}`);
+      const nextAlerts = await window.depClean.alerts.list({ limit: ALERT_HISTORY_MAX });
+      setAlerts(nextAlerts);
+      setMessage(t('message.scanSetComplete', { name: targetSet.name }));
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -188,10 +534,11 @@ export default function App() {
 
   async function startWatch() {
     try {
+      await flushPendingSettings();
       setBusy(true);
       const status = await window.depClean.watch.start();
       setWatchStatus(status);
-      setMessage('Hybrid monitor started.');
+      setMessage(t('message.monitorStarted'));
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -202,10 +549,11 @@ export default function App() {
 
   async function stopWatch() {
     try {
+      await flushPendingSettings();
       setBusy(true);
       const status = await window.depClean.watch.stop();
       setWatchStatus(status);
-      setMessage('Hybrid monitor stopped.');
+      setMessage(t('message.monitorStopped'));
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -224,7 +572,7 @@ export default function App() {
     const additions = picked.filter((item) => !existing.has(item)).map((item) => createTarget(item));
 
     if (additions.length === 0) {
-      setMessage('No new folders to add.');
+      setMessage(t('message.noNewFolders'));
       return;
     }
 
@@ -233,12 +581,20 @@ export default function App() {
     });
   }
 
-  function patchWatchTarget(targetId: string, patch: Partial<WatchTarget>) {
+  function patchWatchTarget(
+    targetId: string,
+    patch: Partial<WatchTarget>,
+    mode: 'immediate' | 'debounced' = 'immediate'
+  ) {
     if (!settings) return;
     const nextTargets = settings.watchTargets.map((target) => {
       if (target.id !== targetId) return target;
       return { ...target, ...patch };
     });
+    if (mode === 'debounced') {
+      queueSettingsUpdate({ watchTargets: nextTargets });
+      return;
+    }
     void updateSettings({ watchTargets: nextTargets });
   }
 
@@ -256,7 +612,7 @@ export default function App() {
     const now = new Date().toISOString();
     const scanSet: ScanSet = {
       id: crypto.randomUUID(),
-      name: newSetName.trim() || buildSetName(picked),
+      name: newSetName.trim() || buildSetName(picked, t),
       paths: [...new Set(picked)],
       createdAt: now,
       updatedAt: now,
@@ -279,14 +635,14 @@ export default function App() {
     }
   }
 
-  async function openCleanupPreview() {
+  async function openCleanupPreview(paths?: string[]) {
     try {
+      await flushPendingSettings();
       setBusy(true);
-      const paths = selectedSet ? selectedSet.paths : undefined;
-      const nextPreview = await window.depClean.cleanup.preview(paths);
+      const nextPreview = await window.depClean.cleanup.preview(paths ?? selectedSet?.paths);
       setPreview(nextPreview);
-      setSelectedDeletePaths(nextPreview.directories.map((dir) => dir.path));
-      setMessage('Cleanup approval list generated.');
+      setSelectedDeletePaths(new Set(nextPreview.directories.map((dir) => dir.path)));
+      setMessage(t('message.cleanupPreviewGenerated'));
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -300,13 +656,21 @@ export default function App() {
 
     try {
       setBusy(true);
-      const result = await window.depClean.cleanup.confirmDelete(preview.approvalId, selectedDeletePaths);
+      const result = await window.depClean.cleanup.confirmDelete(
+        preview.approvalId,
+        Array.from(selectedDeletePaths)
+      );
       setPreview(null);
-      setSelectedDeletePaths([]);
-      setMessage(`Cleanup complete: ${result.deletedCount} deleted, freed ${bytesToText(result.freedSize)}`);
+      setSelectedDeletePaths(new Set());
+      setMessage(
+        t('message.cleanupComplete', {
+          count: result.deletedCount,
+          size: bytesToText(result.freedSize),
+        })
+      );
 
       if (result.failures.length > 0) {
-        setErrorMessage(`Some deletes failed: ${result.failures.length}`);
+        setErrorMessage(t('error.someDeletesFailed', { count: result.failures.length }));
       } else {
         setErrorMessage('');
       }
@@ -323,59 +687,60 @@ export default function App() {
     const unreadIds = alerts.filter((alert) => !alert.read).map((alert) => alert.id);
     if (unreadIds.length === 0) return;
     const next = await window.depClean.alerts.markRead(unreadIds);
-    setAlerts(next);
+    setAlerts(next.slice(0, ALERT_HISTORY_MAX));
   }
 
   async function clearAlerts() {
     await window.depClean.alerts.clear();
     setAlerts([]);
+    setAlertPage(1);
   }
 
   async function completeStartupChoice(enableAutoStart: boolean) {
-    try {
-      setBusy(true);
-      const nextSettings = await window.depClean.settings.update({
+    const successMessage = enableAutoStart
+      ? t('message.startupAutoStartEnabled')
+      : t('message.startupAutoStartDisabled');
+
+    await updateSettingsNow(
+      {
         autoStart: enableAutoStart,
         startupChoiceCompleted: true,
         runInTray: true,
-      });
-      setSettings(nextSettings);
-      setShowStartupChoiceModal(false);
-      setMessage(
-        enableAutoStart
-          ? 'Auto-start enabled. The app will launch to tray on sign-in.'
-          : 'Auto-start kept disabled. You can change this later in Settings.'
-      );
-      setErrorMessage('');
-    } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusy(false);
-    }
-  }
+      },
+      successMessage
+    );
 
+    setShowStartupChoiceModal(false);
+  }
   if (!settings || !watchStatus) {
-    return <div className="loading">Initializing app...</div>;
+    return (
+      <div className="loading">
+        <div>
+          <p>{t('loading.initializing')}</p>
+          {errorMessage && <p className="error-text">{errorMessage}</p>}
+        </div>
+      </div>
+    );
   }
 
   return (
     <div className="app-shell">
       <header className="top-header">
         <div>
-          <p className="eyebrow">CLI Core + Desktop GUI</p>
-          <h1>dep-clean hybrid monitor</h1>
-          <p className="subtitle">Periodic scans + realtime watch + threshold alerts + approved cleanup</p>
+          <p className="eyebrow">{t('header.eyebrow')}</p>
+          <h1>{t('header.title')}</h1>
+          <p className="subtitle">{t('header.subtitle')}</p>
         </div>
         <div className="status-pills">
           <span className={`pill ${watchStatus.running ? 'ok' : 'idle'}`}>
-            {watchStatus.running ? 'Monitoring ON' : 'Monitoring OFF'}
+            {watchStatus.running ? t('header.monitoringOn') : t('header.monitoringOff')}
           </span>
-          <span className="pill neutral">Watchers {watchStatus.watcherCount}</span>
+          <span className="pill neutral">{t('header.watchers', { count: watchStatus.watcherCount })}</span>
         </div>
       </header>
 
       <nav className="tabs">
-        {TAB_LABELS.map((tab) => (
+        {tabLabels.map((tab) => (
           <button
             key={tab.key}
             className={activeTab === tab.key ? 'tab active' : 'tab'}
@@ -390,50 +755,54 @@ export default function App() {
         {activeTab === 'dashboard' && (
           <section className="panel">
             <div className="panel-header">
-              <h2>Run Controls</h2>
+              <h2>{t('dashboard.runControls')}</h2>
               <div className="button-row">
                 <button className="btn primary" disabled={busy} onClick={() => void runManualScan()}>
-                  Manual Scan
+                  {t('dashboard.manualScan')}
                 </button>
                 <button className="btn" disabled={busy || !selectedSet} onClick={() => void runSelectedSet()}>
-                  Run Scan Set
+                  {t('dashboard.runScanSet')}
                 </button>
                 <button className="btn" disabled={busy} onClick={() => void openCleanupPreview()}>
-                  Build Cleanup Approval
+                  {t('dashboard.buildCleanupApproval')}
                 </button>
                 <button className="btn" disabled={busy || watchStatus.running} onClick={() => void startWatch()}>
-                  Start Monitor
+                  {t('dashboard.startMonitor')}
                 </button>
                 <button className="btn danger" disabled={busy || !watchStatus.running} onClick={() => void stopWatch()}>
-                  Stop Monitor
+                  {t('dashboard.stopMonitor')}
                 </button>
               </div>
             </div>
 
             <div className="metrics-row">
               <article className="metric-card">
-                <h3>Latest Total Size</h3>
+                <h3>{t('dashboard.latestTotalSize')}</h3>
                 <p>{bytesToText(lastScan?.totalSize ?? 0)}</p>
               </article>
               <article className="metric-card">
-                <h3>Latest Directory Count</h3>
+                <h3>{t('dashboard.latestDirectoryCount')}</h3>
                 <p>{lastScan?.directoryCount ?? 0}</p>
               </article>
               <article className="metric-card">
-                <h3>Next Periodic Run</h3>
-                <p>{watchStatus.nextRunAt ? timestampText(watchStatus.nextRunAt) : 'Disabled'}</p>
+                <h3>{t('dashboard.nextPeriodicRun')}</h3>
+                <p>{watchStatus.nextRunAt ? timestampText(watchStatus.nextRunAt) : t('dashboard.disabled')}</p>
               </article>
             </div>
 
             {progress && (
               <div className="inline-note">
-                Scan progress: {progress.current}/{progress.total} ({progress.targetPath})
+                {t('dashboard.scanProgress', {
+                  current: progress.current,
+                  total: progress.total,
+                  path: progress.targetPath,
+                })}
               </div>
             )}
 
             {lastOutcome && lastOutcome.alerts.length > 0 && (
               <div className="inline-note warning">
-                Last scan generated {lastOutcome.alerts.length} threshold events.
+                {t('dashboard.lastScanAlertCount', { count: lastOutcome.alerts.length })}
               </div>
             )}
 
@@ -453,7 +822,9 @@ export default function App() {
                     ))}
                   </ul>
                   {target.directories.length > 8 && (
-                    <p className="muted">+ {target.directories.length - 8} more directories</p>
+                    <p className="muted">
+                      {t('dashboard.moreDirectories', { count: target.directories.length - 8 })}
+                    </p>
                   )}
                 </article>
               ))}
@@ -464,17 +835,17 @@ export default function App() {
         {activeTab === 'scanSets' && (
           <section className="panel">
             <div className="panel-header">
-              <h2>Batch Scan Sets</h2>
+              <h2>{t('scanSets.title')}</h2>
             </div>
 
             <div className="inline-form">
               <input
-                placeholder="New set name (optional)"
+                placeholder={t('scanSets.newSetPlaceholder')}
                 value={newSetName}
                 onChange={(event) => setNewSetName(event.target.value)}
               />
               <button className="btn primary" disabled={busy} onClick={() => void createScanSet()}>
-                Pick Folders + Save Set
+                {t('scanSets.pickFoldersSave')}
               </button>
             </div>
 
@@ -490,7 +861,7 @@ export default function App() {
                       />
                       <strong>{scanSet.name}</strong>
                     </label>
-                    <span>{scanSet.paths.length} folders</span>
+                    <span>{t('scanSets.folderCount', { count: scanSet.paths.length })}</span>
                   </header>
                   <ul>
                     {scanSet.paths.map((targetPath) => (
@@ -505,23 +876,23 @@ export default function App() {
                       disabled={busy}
                       onClick={() => {
                         setSelectedSetId(scanSet.id);
-                        void runSelectedSet();
+                        void runSelectedSet(scanSet.id);
                       }}
                     >
-                      Run Set
+                      {t('scanSets.runSet')}
                     </button>
                     <button
                       className="btn"
                       disabled={busy}
                       onClick={() => {
                         setSelectedSetId(scanSet.id);
-                        void openCleanupPreview();
+                        void openCleanupPreview(scanSet.paths);
                       }}
                     >
-                      Build Cleanup
+                      {t('scanSets.buildCleanup')}
                     </button>
                     <button className="btn danger" disabled={busy} onClick={() => deleteScanSet(scanSet.id)}>
-                      Delete Set
+                      {t('scanSets.deleteSet')}
                     </button>
                   </div>
                 </article>
@@ -533,12 +904,12 @@ export default function App() {
         {activeTab === 'settings' && (
           <section className="panel">
             <div className="panel-header">
-              <h2>System Settings</h2>
+              <h2>{t('settings.title')}</h2>
             </div>
 
             <div className="settings-grid">
               <label>
-                <span>Auto-start on login</span>
+                <span>{t('settings.autoStartOnLogin')}</span>
                 <input
                   type="checkbox"
                   checked={settings.autoStart}
@@ -547,7 +918,7 @@ export default function App() {
               </label>
 
               <label>
-                <span>Enable periodic scans</span>
+                <span>{t('settings.enablePeriodicScans')}</span>
                 <input
                   type="checkbox"
                   checked={settings.periodicEnabled}
@@ -556,7 +927,7 @@ export default function App() {
               </label>
 
               <label>
-                <span>Enable realtime watch</span>
+                <span>{t('settings.enableRealtimeWatch')}</span>
                 <input
                   type="checkbox"
                   checked={settings.realtimeEnabled}
@@ -565,53 +936,54 @@ export default function App() {
               </label>
 
               <label>
-                <span>Periodic interval (min)</span>
+                <span>{t('settings.periodicIntervalMin')}</span>
                 <input
                   type="number"
                   min={5}
                   max={1440}
                   value={settings.periodicMinutes}
                   onChange={(event) =>
-                    void updateSettings({ periodicMinutes: Number.parseInt(event.target.value || '60', 10) })
+                    queueSettingsUpdate({ periodicMinutes: Number.parseInt(event.target.value || '60', 10) })
                   }
+                  onBlur={() => void flushPendingSettings()}
                 />
               </label>
 
               <label>
-                <span>Global threshold (MB)</span>
+                <span>{t('settings.globalThresholdMb')}</span>
                 <input
                   type="number"
                   min={0}
                   value={bytesToMbInput(settings.globalThresholdBytes)}
                   onChange={(event) =>
-                    void updateSettings({
+                    queueSettingsUpdate({
                       globalThresholdBytes: mbInputToBytes(Number.parseInt(event.target.value || '0', 10)),
                     })
                   }
+                  onBlur={() => void flushPendingSettings()}
                 />
               </label>
 
               <label>
-                <span>Alert cooldown (min)</span>
+                <span>{t('settings.alertCooldownMin')}</span>
                 <input
                   type="number"
                   min={0}
                   value={settings.alertCooldownMinutes}
                   onChange={(event) =>
-                    void updateSettings({ alertCooldownMinutes: Number.parseInt(event.target.value || '0', 10) })
+                    queueSettingsUpdate({ alertCooldownMinutes: Number.parseInt(event.target.value || '0', 10) })
                   }
+                  onBlur={() => void flushPendingSettings()}
                 />
               </label>
             </div>
 
-            <div className="inline-note">
-              Closing the window minimizes to tray. Quit from tray menu when needed.
-            </div>
+            <div className="inline-note">{t('settings.trayPolicyNote')}</div>
 
             <div className="panel-header">
-              <h2>Watch Targets</h2>
+              <h2>{t('settings.watchTargets')}</h2>
               <button className="btn primary" disabled={busy} onClick={() => void addWatchTargets()}>
-                Add Folders
+                {t('settings.addFolders')}
               </button>
             </div>
 
@@ -628,27 +1000,32 @@ export default function App() {
                       <code>{target.path}</code>
                     </label>
                     <button className="btn danger" onClick={() => removeWatchTarget(target.id)}>
-                      Remove
+                      {t('settings.remove')}
                     </button>
                   </div>
                   <div className="target-fields">
                     <label>
-                      Target threshold (MB)
+                      {t('settings.targetThresholdMb')}
                       <input
                         type="number"
                         min={0}
                         value={target.targetThresholdBytes ? bytesToMbInput(target.targetThresholdBytes) : 0}
                         onChange={(event) => {
                           const numeric = Number.parseInt(event.target.value || '0', 10);
-                          patchWatchTarget(target.id, {
-                            targetThresholdBytes: numeric > 0 ? mbInputToBytes(numeric) : undefined,
-                          });
+                          patchWatchTarget(
+                            target.id,
+                            {
+                              targetThresholdBytes: numeric > 0 ? mbInputToBytes(numeric) : undefined,
+                            },
+                            'debounced'
+                          );
                         }}
+                        onBlur={() => void flushPendingSettings()}
                       />
                     </label>
 
                     <label>
-                      only (comma)
+                      {t('settings.onlyComma')}
                       <input
                         type="text"
                         value={target.only?.join(',') ?? ''}
@@ -657,13 +1034,14 @@ export default function App() {
                             .split(',')
                             .map((item) => item.trim())
                             .filter(Boolean);
-                          patchWatchTarget(target.id, { only: only.length > 0 ? only : undefined });
+                          patchWatchTarget(target.id, { only: only.length > 0 ? only : undefined }, 'debounced');
                         }}
+                        onBlur={() => void flushPendingSettings()}
                       />
                     </label>
 
                     <label>
-                      exclude (comma)
+                      {t('settings.excludeComma')}
                       <input
                         type="text"
                         value={target.exclude?.join(',') ?? ''}
@@ -672,10 +1050,15 @@ export default function App() {
                             .split(',')
                             .map((item) => item.trim())
                             .filter(Boolean);
-                          patchWatchTarget(target.id, {
-                            exclude: exclude.length > 0 ? exclude : undefined,
-                          });
+                          patchWatchTarget(
+                            target.id,
+                            {
+                              exclude: exclude.length > 0 ? exclude : undefined,
+                            },
+                            'debounced'
+                          );
                         }}
+                        onBlur={() => void flushPendingSettings()}
                       />
                     </label>
                   </div>
@@ -686,34 +1069,16 @@ export default function App() {
         )}
 
         {activeTab === 'alerts' && (
-          <section className="panel">
-            <div className="panel-header">
-              <h2>Alert Event History</h2>
-              <div className="button-row">
-                <button className="btn" onClick={() => void markAllAlertsRead()}>
-                  Mark all read
-                </button>
-                <button className="btn danger" onClick={() => void clearAlerts()}>
-                  Clear history
-                </button>
-              </div>
-            </div>
-
-            <div className="alert-list">
-              {alerts.map((alert) => (
-                <article key={alert.id} className={alert.read ? 'alert-card read' : 'alert-card'}>
-                  <header>
-                    <strong>{alert.status === 'exceeded' ? 'Exceeded' : 'Resolved'}</strong>
-                    <span>{alert.scope === 'global' ? 'GLOBAL' : alert.targetPath ?? alert.targetId}</span>
-                  </header>
-                  <p>
-                    {bytesToText(alert.currentBytes)} / threshold {bytesToText(alert.thresholdBytes)}
-                  </p>
-                  <time>{timestampText(alert.timestamp)}</time>
-                </article>
-              ))}
-            </div>
-          </section>
+          <AlertsSection
+            alerts={pagedAlerts}
+            alertPage={alertPage}
+            alertPageCount={alertPageCount}
+            t={t}
+            onMarkAllRead={() => void markAllAlertsRead()}
+            onClearAlerts={() => void clearAlerts()}
+            onPreviousPage={() => setAlertPage((page) => page - 1)}
+            onNextPage={() => setAlertPage((page) => page + 1)}
+          />
         )}
       </main>
 
@@ -725,78 +1090,42 @@ export default function App() {
       )}
 
       {showStartupChoiceModal && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h2>Choose Startup Behavior</h2>
-            <p>This app runs as a tray-resident utility. Pick your login startup option.</p>
-            <div className="modal-actions">
-              <button className="btn primary" disabled={busy} onClick={() => void completeStartupChoice(true)}>
-                Enable Auto-start
-              </button>
-              <button className="btn" disabled={busy} onClick={() => void completeStartupChoice(false)}>
-                Decide Later
-              </button>
-            </div>
-          </div>
-        </div>
+        <StartupChoiceModal
+          busy={busy}
+          t={t}
+          onEnableAutoStart={() => void completeStartupChoice(true)}
+          onDecideLater={() => void completeStartupChoice(false)}
+        />
       )}
 
       {preview && (
-        <div className="modal-backdrop">
-          <div className="modal">
-            <h2>Cleanup Approval</h2>
-            <p>Preview created at: {timestampText(preview.createdAt)}</p>
-            <p>
-              Selected {selectedDeletePaths.length}/{preview.directories.length} directories. Estimated recovery:{' '}
-              {bytesToText(selectedPreviewSize)}
-            </p>
-
-            <div className="modal-actions">
-              <button
-                className="btn"
-                onClick={() => setSelectedDeletePaths(preview.directories.map((dir) => dir.path))}
-              >
-                Select all
-              </button>
-              <button className="btn" onClick={() => setSelectedDeletePaths([])}>
-                Clear all
-              </button>
-            </div>
-
-            <div className="modal-list">
-              {preview.directories.map((dir) => (
-                <label key={dir.path}>
-                  <input
-                    type="checkbox"
-                    checked={selectedDeletePaths.includes(dir.path)}
-                    onChange={(event) => {
-                      if (event.target.checked) {
-                        setSelectedDeletePaths((prev) => [...prev, dir.path]);
-                      } else {
-                        setSelectedDeletePaths((prev) => prev.filter((item) => item !== dir.path));
-                      }
-                    }}
-                  />
-                  <code>{dir.path}</code>
-                  <span>{bytesToText(dir.size)}</span>
-                </label>
-              ))}
-            </div>
-
-            <div className="modal-actions">
-              <button className="btn" onClick={() => setPreview(null)}>
-                Cancel
-              </button>
-              <button
-                className="btn danger"
-                disabled={selectedDeletePaths.length === 0 || busy}
-                onClick={() => void confirmCleanup()}
-              >
-                Confirm delete selected
-              </button>
-            </div>
-          </div>
-        </div>
+        <CleanupPreviewModal
+          preview={preview}
+          busy={busy}
+          selectedDeletePaths={selectedDeletePaths}
+          selectedPreviewSize={selectedPreviewSize}
+          previewPage={previewPage}
+          previewPageCount={previewPageCount}
+          pagedPreviewDirectories={pagedPreviewDirectories}
+          t={t}
+          onSelectAll={() => setSelectedDeletePaths(new Set(preview.directories.map((dir) => dir.path)))}
+          onClearAll={() => setSelectedDeletePaths(new Set())}
+          onTogglePath={(dirPath, checked) => {
+            setSelectedDeletePaths((current) => {
+              const next = new Set(current);
+              if (checked) {
+                next.add(dirPath);
+              } else {
+                next.delete(dirPath);
+              }
+              return next;
+            });
+          }}
+          onPreviousPage={() => setPreviewPage((page) => page - 1)}
+          onNextPage={() => setPreviewPage((page) => page + 1)}
+          onCancel={() => setPreview(null)}
+          onConfirm={() => void confirmCleanup()}
+        />
       )}
     </div>
   );

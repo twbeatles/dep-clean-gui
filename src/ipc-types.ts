@@ -28,7 +28,7 @@ export interface DepCleanApi {
     onStatusChanged: (listener: (status: WatchStatus) => void) => () => void;
   };
   alerts: {
-    list: () => Promise<ThresholdAlert[]>;
+    list: (options?: { limit?: number }) => Promise<ThresholdAlert[]>;
     markRead: (ids: string[]) => Promise<ThresholdAlert[]>;
     clear: () => Promise<ThresholdAlert[]>;
     onCreated: (listener: (alerts: ThresholdAlert[]) => void) => () => void;

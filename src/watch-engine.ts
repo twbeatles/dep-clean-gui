@@ -18,13 +18,51 @@ interface WatchEngineCallbacks {
   onStatusChanged?: (status: WatchStatus) => void;
 }
 
+function normalizeTokenList(value?: string[]): string {
+  return (value ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .sort()
+    .join(',');
+}
+
+function watcherTargetSignature(target: WatchTarget): string {
+  return [
+    target.id,
+    target.path.trim(),
+    target.enabled ? '1' : '0',
+    normalizeTokenList(target.only),
+    normalizeTokenList(target.exclude),
+  ].join('|');
+}
+
+function watcherSettingsSignature(settings: AppSettings): string {
+  return settings.watchTargets
+    .map((target) => watcherTargetSignature(target))
+    .sort()
+    .join('||');
+}
+
+function hasWatcherRelevantSettingsChanges(previous: AppSettings, next: AppSettings): boolean {
+  if (previous.realtimeEnabled !== next.realtimeEnabled) return true;
+  return watcherSettingsSignature(previous) !== watcherSettingsSignature(next);
+}
+
+function hasPeriodicSettingsChanges(previous: AppSettings, next: AppSettings): boolean {
+  return (
+    previous.periodicEnabled !== next.periodicEnabled ||
+    previous.periodicMinutes !== next.periodicMinutes
+  );
+}
+
 export class WatchEngine {
   private running = false;
   private settings: AppSettings;
   private watchers: FSWatcher[] = [];
   private periodicTimer?: NodeJS.Timeout;
   private realtimeTimer?: NodeJS.Timeout;
-  private queuedRealtimeTargetIds = new Set<string>();
+  private pendingRealtimeTargetIds = new Set<string>();
+  private realtimeScanEnqueued = false;
   private scanQueue: Promise<ScanExecutionOutcome | null> = Promise.resolve(null);
   private nextRunAt?: string;
   private lastRunAt?: string;
@@ -54,6 +92,7 @@ export class WatchEngine {
   }
 
   updateSettings(settings: AppSettings): void {
+    const previousSettings = this.settings;
     this.settings = settings;
 
     if (!this.running) {
@@ -61,8 +100,14 @@ export class WatchEngine {
       return;
     }
 
-    this.resetPeriodicTimer();
-    void this.rebuildWatchers();
+    if (hasPeriodicSettingsChanges(previousSettings, settings)) {
+      this.resetPeriodicTimer();
+    }
+
+    if (hasWatcherRelevantSettingsChanges(previousSettings, settings)) {
+      void this.rebuildWatchers();
+    }
+
     this.emitStatus();
   }
 
@@ -91,7 +136,8 @@ export class WatchEngine {
       this.realtimeTimer = undefined;
     }
 
-    this.queuedRealtimeTargetIds.clear();
+    this.pendingRealtimeTargetIds.clear();
+    this.realtimeScanEnqueued = false;
 
     await Promise.all(this.watchers.map((watcher) => watcher.close()));
     this.watchers = [];
@@ -121,28 +167,15 @@ export class WatchEngine {
   async runRealtimeForTarget(targetId: string): Promise<void> {
     if (!this.running || !this.settings.realtimeEnabled) return;
 
-    this.queuedRealtimeTargetIds.add(targetId);
+    this.pendingRealtimeTargetIds.add(targetId);
 
     if (this.realtimeTimer) {
       clearTimeout(this.realtimeTimer);
     }
 
     this.realtimeTimer = setTimeout(() => {
-      const ids = [...this.queuedRealtimeTargetIds];
-      this.queuedRealtimeTargetIds.clear();
-
-      const targets = this.settings.watchTargets
-        .filter((target) => target.enabled && ids.includes(target.id))
-        .map((target) => ({
-          id: target.id,
-          path: target.path,
-          only: target.only,
-          exclude: target.exclude,
-        }));
-
-      if (targets.length > 0) {
-        void this.enqueueScan('watch-realtime', targets);
-      }
+      this.realtimeTimer = undefined;
+      this.flushRealtimeQueue();
     }, 2000);
   }
 
@@ -183,6 +216,44 @@ export class WatchEngine {
     }
 
     this.emitStatus();
+  }
+
+  private flushRealtimeQueue(): void {
+    if (!this.running || !this.settings.realtimeEnabled) {
+      this.pendingRealtimeTargetIds.clear();
+      this.realtimeScanEnqueued = false;
+      return;
+    }
+
+    if (this.realtimeScanEnqueued || this.pendingRealtimeTargetIds.size === 0) {
+      return;
+    }
+
+    const pendingIds = this.pendingRealtimeTargetIds;
+    this.pendingRealtimeTargetIds = new Set<string>();
+
+    const targets = this.settings.watchTargets
+      .filter((target) => target.enabled && pendingIds.has(target.id))
+      .map((target) => ({
+        id: target.id,
+        path: target.path,
+        only: target.only,
+        exclude: target.exclude,
+      }));
+
+    if (targets.length === 0) {
+      return;
+    }
+
+    this.realtimeScanEnqueued = true;
+    void this.enqueueScan('watch-realtime', targets)
+      .catch(() => null)
+      .finally(() => {
+        this.realtimeScanEnqueued = false;
+        if (this.pendingRealtimeTargetIds.size > 0) {
+          this.flushRealtimeQueue();
+        }
+      });
   }
 
   private resetPeriodicTimer(): void {

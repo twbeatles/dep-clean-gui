@@ -67,6 +67,35 @@ dep-clean --only node_modules,venv
 dep-clean --exclude vendor,Pods
 ```
 
+## 성능 최적화 노트
+
+- 스캐너 코어는 반복형 순회 + 파일 stat 제한 동시성으로 동작합니다.
+- 다중 타겟 스캔은 제한 병렬로 처리되어 watch/set 실행 속도를 개선했습니다.
+- watcher 재구성은 watcher 관련 설정이 바뀐 경우에만 수행합니다.
+- 실시간 이벤트 폭주 시 스캔 요청을 병합(coalescing)해 큐 적체를 방지합니다.
+- GUI 설정 입력은 debounce + blur 커밋으로 IPC/디스크 쓰기 빈도를 줄였습니다.
+- 알림 이력/정리 미리보기는 페이지네이션으로 대량 데이터 렌더링 부하를 낮췄습니다.
+- CLI 플래그 및 승인 기반 삭제 정책은 그대로 유지됩니다.
+
+## IPC 확장 (하위 호환)
+
+- `alerts.list(options?: { limit?: number })`에 선택적 `limit` 인자를 추가했습니다.
+- 옵션 없이 `alerts.list()`를 호출하면 기존 동작과 동일합니다.
+
+## Windows 패키징 브리지 안정성
+
+- 패키징 실행 시 preload는 CommonJS(`dist/electron/preload.cjs`)로 빌드됩니다.
+- Electron main은 `preload.cjs`를 명시적으로 로드하도록 고정되었습니다.
+- 이 변경으로 패키징 실행 시 배경만 표시되고 UI가 동작하지 않던 preload 파싱 오류를 해결했습니다.
+
+## 로케일 기반 UI (en/ko)
+
+- 데스크톱 UI 언어는 OS/PC 로케일을 기준으로 자동 선택됩니다.
+  - `ko*` -> 한국어
+  - 그 외 -> 영어
+- 적용 범위는 렌더러 UI, 트레이 메뉴, OS 알림, 폴더 선택 다이얼로그 제목입니다.
+- CLI 동작/플래그는 변경하지 않습니다.
+
 ## 개발 명령
 
 ```bash

@@ -37,6 +37,45 @@ The filename intentionally follows project request: `cladue.md`.
 - Scan runner orchestration: `src/scan-runner.ts`
 - Launch mode utility: `src/electron-launch-mode.ts`
 
+## Performance Refactor Snapshot (2026-03)
+
+- Scanner:
+  - iterative traversal + bounded stat concurrency
+  - supports path-like targets such as `vendor/bundle`
+- Scan runner:
+  - bounded target parallelism (`TARGET_SCAN_CONCURRENCY=2`)
+- Watch engine:
+  - diff-based watcher rebuild and periodic timer reset
+  - realtime event coalescing to prevent queue explosion
+- Settings store:
+  - in-memory cache
+  - avoid no-op rewrite
+  - single-write update path
+- Alert manager:
+  - `list({ limit })` support
+  - history cap (`ALERT_HISTORY_MAX=5000`)
+- Renderer:
+  - debounced settings commit + blur flush
+  - `Set<string>` cleanup selection
+  - paginated alert/cleanup lists
+
+## Windows Packaging + i18n Snapshot (2026-03)
+
+- Preload bridge stability:
+  - preload source is TypeScript CommonJS entry (`electron/preload.cts`)
+  - packaged runtime uses `dist/electron/preload.cjs`
+  - main process loads `preload.cjs` explicitly
+- Locale policy:
+  - `ko*` => Korean
+  - otherwise English (fallback)
+- i18n scope:
+  - renderer UI
+  - tray menu labels
+  - OS notifications
+  - folder picker dialog title
+- Diagnostics:
+  - startup log path remains `%TEMP%/dep-clean-gui-startup.log`
+
 ## Startup / Tray Rules
 
 - `AppSettings.startupChoiceCompleted` controls first-run modal visibility.

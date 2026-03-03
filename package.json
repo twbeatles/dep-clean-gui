@@ -78,7 +78,9 @@
       "package.json",
       "!**/*.map",
       "!**/*.d.ts",
-      "!**/*.d.ts.map"
+      "!**/*.d.cts",
+      "!**/*.d.ts.map",
+      "!**/*.d.cts.map"
     ],
     "directories": {
       "buildResources": "electron/assets",
@@ -88,7 +90,8 @@
       "category": "public.app-category.developer-tools"
     },
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "signAndEditExecutable": false
     },
     "linux": {
       "target": "AppImage",

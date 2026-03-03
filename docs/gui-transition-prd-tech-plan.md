@@ -166,3 +166,43 @@ Core flow:
 - Keep package compression at `maximum` for distribution builds.
 - Regression rule:
   - If installer size grows unexpectedly, first inspect `app.asar` for recursive build-output inclusion.
+
+## 16. Performance Refactor Notes (2026-03)
+- Scanner implementation is optimized for large trees:
+  - iterative traversal (non-recursive)
+  - bounded file stat concurrency
+  - path-like target matching support (example: `vendor/bundle`)
+- Scan runner now executes targets with bounded parallelism (`TARGET_SCAN_CONCURRENCY=2`).
+- Watch engine applies settings diffs:
+  - periodic timer reset only on periodic setting changes
+  - watcher rebuild only on realtime/watch-target relevant changes
+  - realtime event bursts are coalesced into bounded queued runs
+- Settings store now uses in-memory caching and single-write update path to reduce repeated disk I/O.
+- Alert manager adds:
+  - `alerts.list({ limit })` optional pagination-friendly query
+  - capped history retention (`ALERT_HISTORY_MAX=5000`)
+- Renderer optimizations:
+  - debounced settings commit (`SETTINGS_COMMIT_DEBOUNCE_MS=400`) + blur flush
+  - cleanup selection uses `Set<string>` state
+  - alert and cleanup preview pagination (`PAGE_SIZE=200`)
+  - modal/alert section split into memoized components
+- Compatibility contract remains unchanged:
+  - tray-resident lifecycle policy
+  - approval-first cleanup
+  - CLI option/behavior stability
+
+## 17. Windows Preload Bridge + Localization Update (2026-03)
+
+- Packaged preload runtime is fixed to CommonJS (`preload.cjs`) to satisfy Electron sandbox preload parsing.
+- Main process now references `dist/electron/preload.cjs` directly.
+- Startup diagnostics continue writing to `%TEMP%/dep-clean-gui-startup.log` for packaged troubleshooting.
+- Localization policy is now locale-driven (`ko*` -> Korean, otherwise English) with fallback to English.
+- Localization scope:
+  - renderer UI strings
+  - tray context menu labels
+  - OS notification title/body
+  - folder picker dialog title
+- Compatibility remains unchanged:
+  - CLI surface/flags
+  - tray-resident lifecycle policy
+  - approval-first cleanup flow

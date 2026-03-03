@@ -4,6 +4,8 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AppScanResult, AppSettings, ThresholdAlert } from './types.js';
 
+const ALERT_HISTORY_MAX = 5000;
+
 interface EvaluatedThreshold {
   key: string;
   scope: 'global' | 'target';
@@ -70,6 +72,10 @@ export class AlertManager {
       this.lastEmittedAt.set(key, toTimestamp(alert.timestamp));
     }
 
+    if (this.trimHistory()) {
+      await this.persist();
+    }
+
     this.hydrated = true;
   }
 
@@ -78,9 +84,16 @@ export class AlertManager {
     await fs.promises.writeFile(this.filePath, JSON.stringify(this.alerts, null, 2), 'utf-8');
   }
 
-  async list(): Promise<ThresholdAlert[]> {
+  async list(options?: { limit?: number }): Promise<ThresholdAlert[]> {
     await this.hydrate();
-    return [...this.alerts].sort((a, b) => toTimestamp(b.timestamp) - toTimestamp(a.timestamp));
+    const sorted = [...this.alerts].sort((a, b) => toTimestamp(b.timestamp) - toTimestamp(a.timestamp));
+    const limit = options?.limit ?? 0;
+
+    if (limit > 0) {
+      return sorted.slice(0, limit);
+    }
+
+    return sorted;
   }
 
   async clear(): Promise<void> {
@@ -108,6 +121,12 @@ export class AlertManager {
     await this.hydrate();
 
     const evaluated: EvaluatedThreshold[] = [];
+    const watchTargetThresholdById = new Map<string, number>();
+
+    for (const target of settings.watchTargets) {
+      if (!target.targetThresholdBytes || target.targetThresholdBytes <= 0) continue;
+      watchTargetThresholdById.set(target.id, target.targetThresholdBytes);
+    }
 
     if (settings.globalThresholdBytes > 0) {
       evaluated.push({
@@ -120,9 +139,8 @@ export class AlertManager {
     }
 
     for (const target of scanResult.targets) {
-      const sourceTarget = settings.watchTargets.find((item) => item.id === target.targetId);
-      const thresholdBytes = sourceTarget?.targetThresholdBytes;
-      if (!thresholdBytes || thresholdBytes <= 0) continue;
+      const thresholdBytes = watchTargetThresholdById.get(target.targetId);
+      if (!thresholdBytes) continue;
 
       evaluated.push({
         key: `target:${target.targetId}`,
@@ -186,10 +204,20 @@ export class AlertManager {
       }
     }
 
-    if (created.length > 0) {
+    const trimmed = this.trimHistory();
+
+    if (created.length > 0 || trimmed) {
       await this.persist();
     }
 
     return created;
+  }
+
+  private trimHistory(): boolean {
+    if (this.alerts.length <= ALERT_HISTORY_MAX) return false;
+    this.alerts = this.alerts
+      .sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp))
+      .slice(-ALERT_HISTORY_MAX);
+    return true;
   }
 }

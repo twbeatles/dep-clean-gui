@@ -7,7 +7,17 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   root: __dirname,
-  plugins: [react()],
+  base: './',
+  plugins: [
+    react(),
+    {
+      name: 'electron-file-protocol-index-fix',
+      apply: 'build',
+      transformIndexHtml(html) {
+        return html.replace(/\s+crossorigin(?=(\s|>))/g, '');
+      },
+    },
+  ],
   server: {
     port: 5173,
     strictPort: true,

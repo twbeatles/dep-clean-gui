@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -69,5 +69,30 @@ describe('AlertManager', () => {
     const resolved = await manager.evaluate(createScanResult(20, 10), settings);
     assert.equal(resolved.length, 2);
     assert.equal(resolved.every((item) => item.status === 'resolved'), true);
+  });
+
+  it('supports list(limit) and caps alert history', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-alerts-cap-'));
+    tempRoots.push(root);
+    const alertsPath = path.join(root, 'alerts.json');
+    const now = Date.now();
+    const seed = Array.from({ length: 5100 }, (_, index) => ({
+      id: `alert-${index}`,
+      scope: 'global',
+      currentBytes: index,
+      thresholdBytes: 100,
+      status: index % 2 === 0 ? 'exceeded' : 'resolved',
+      timestamp: new Date(now + index).toISOString(),
+      read: false,
+    }));
+    writeFileSync(alertsPath, JSON.stringify(seed, null, 2), 'utf-8');
+
+    const manager = new AlertManager(root);
+
+    const all = await manager.list();
+    assert.equal(all.length, 5000);
+
+    const limited = await manager.list({ limit: 100 });
+    assert.equal(limited.length, 100);
   });
 });

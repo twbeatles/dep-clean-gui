@@ -67,6 +67,35 @@ dep-clean --only node_modules,venv
 dep-clean --exclude vendor,Pods
 ```
 
+## Performance Optimization Notes
+
+- Scanner core uses iterative traversal + bounded file stat concurrency.
+- Multi-target scans run with bounded parallelism for faster watch/set runs.
+- Watch engine now rebuilds watchers only when watcher-relevant settings change.
+- Realtime burst events are coalesced to avoid scan queue overgrowth.
+- Settings inputs in GUI use debounce + blur commit to reduce IPC/disk churn.
+- Alert history and cleanup preview now use pagination for large datasets.
+- CLI flags and approval-first cleanup policy remain unchanged.
+
+## IPC Addition (Backward Compatible)
+
+- `alerts.list(options?: { limit?: number })` now supports optional `limit`.
+- Calling `alerts.list()` without options keeps existing behavior.
+
+## Windows Packaging Bridge Stability
+
+- Preload is compiled as CommonJS (`dist/electron/preload.cjs`) for packaged builds.
+- Electron main now loads `preload.cjs` explicitly to avoid sandbox preload parse failures.
+- This fixes packaged startup cases that previously showed only a background with no interactive UI.
+
+## Locale-Based UI (en/ko)
+
+- Desktop UI now auto-selects language from OS/PC locale:
+  - `ko*` -> Korean
+  - others -> English
+- Scope includes renderer UI, tray context menu, OS notifications, and folder picker dialog titles.
+- CLI behavior and flags remain unchanged.
+
 ## Developer Commands
 
 ```bash

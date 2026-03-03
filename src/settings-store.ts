@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   MAX_PERIODIC_MINUTES,
   MIN_PERIODIC_MINUTES,
@@ -132,8 +133,13 @@ async function ensureParentDir(filePath: string): Promise<void> {
   await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
 }
 
+function cloneSettings(settings: AppSettings): AppSettings {
+  return JSON.parse(JSON.stringify(settings)) as AppSettings;
+}
+
 export class SettingsStore {
   private readonly filePath: string;
+  private cachedSettings?: AppSettings;
 
   constructor(baseDir?: string) {
     this.filePath = getSettingsPath(baseDir);
@@ -144,24 +150,39 @@ export class SettingsStore {
   }
 
   async load(): Promise<AppSettings> {
+    if (this.cachedSettings) {
+      return cloneSettings(this.cachedSettings);
+    }
+
     try {
       const raw = await fs.promises.readFile(this.filePath, 'utf-8');
       const parsed = JSON.parse(raw) as Partial<AppSettings>;
       const normalized = normalizeSettings(parsed);
-      await this.save(normalized);
-      return normalized;
+      this.cachedSettings = normalized;
+
+      if (!isDeepStrictEqual(parsed, normalized)) {
+        await this.persist(normalized);
+      }
+
+      return cloneSettings(normalized);
     } catch {
       const defaults = createDefaultSettings();
-      await this.save(defaults);
-      return defaults;
+      await this.persist(defaults);
+      this.cachedSettings = defaults;
+      return cloneSettings(defaults);
     }
   }
 
   async save(settings: AppSettings): Promise<AppSettings> {
     const normalized = normalizeSettings(settings);
-    await ensureParentDir(this.filePath);
-    await fs.promises.writeFile(this.filePath, JSON.stringify(normalized, null, 2), 'utf-8');
-    return normalized;
+
+    if (this.cachedSettings && isDeepStrictEqual(this.cachedSettings, normalized)) {
+      return cloneSettings(this.cachedSettings);
+    }
+
+    await this.persist(normalized);
+    this.cachedSettings = normalized;
+    return cloneSettings(normalized);
   }
 
   async update(partial: Partial<AppSettings>): Promise<AppSettings> {
@@ -174,5 +195,10 @@ export class SettingsStore {
     };
 
     return this.save(merged);
+  }
+
+  private async persist(settings: AppSettings): Promise<void> {
+    await ensureParentDir(this.filePath);
+    await fs.promises.writeFile(this.filePath, JSON.stringify(settings, null, 2), 'utf-8');
   }
 }

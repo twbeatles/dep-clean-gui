@@ -8,6 +8,8 @@ import type {
   WatchTarget,
 } from './types.js';
 
+const TARGET_SCAN_CONCURRENCY = 2;
+
 export interface ScanTargetInput {
   id: string;
   path: string;
@@ -20,6 +22,28 @@ export interface RunScanOptions {
   setId?: string;
   targets: ScanTargetInput[];
   onProgress?: (event: ScanProgressEvent) => void;
+}
+
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T, index: number) => Promise<R>
+): Promise<R[]> {
+  if (items.length === 0) return [];
+
+  const safeLimit = Math.max(1, Math.min(limit, items.length));
+  const out = new Array<R>(items.length);
+  let cursor = 0;
+
+  const workers = Array.from({ length: safeLimit }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      out[index] = await mapper(items[index], index);
+    }
+  });
+
+  await Promise.all(workers);
+  return out;
 }
 
 function normalizeTargets(targets: ScanTargetInput[]): ScanTargetInput[] {
@@ -52,36 +76,40 @@ export async function runScan(options: RunScanOptions): Promise<AppScanResult> {
   const targets = normalizeTargets(options.targets);
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
-  const summaries: TargetScanSummary[] = [];
+  let progressCount = 0;
 
-  for (let i = 0; i < targets.length; i++) {
-    const target = targets[i];
-    options.onProgress?.({
-      runId,
-      source: options.source,
-      current: i + 1,
-      total: targets.length,
-      targetId: target.id,
-      targetPath: target.path,
-    });
+  const summaries: TargetScanSummary[] = await mapLimit(
+    targets,
+    TARGET_SCAN_CONCURRENCY,
+    async (target): Promise<TargetScanSummary> => {
+      progressCount += 1;
+      options.onProgress?.({
+        runId,
+        source: options.source,
+        current: progressCount,
+        total: targets.length,
+        targetId: target.id,
+        targetPath: target.path,
+      });
 
-    const targetStarted = Date.now();
-    const scanResult = await scanDirectories({
-      targetDir: target.path,
-      only: target.only,
-      exclude: target.exclude,
-    });
+      const targetStarted = Date.now();
+      const scanResult = await scanDirectories({
+        targetDir: target.path,
+        only: target.only,
+        exclude: target.exclude,
+      });
 
-    summaries.push({
-      targetId: target.id,
-      targetPath: target.path,
-      totalSize: scanResult.totalSize,
-      directories: scanResult.directories,
-      startedAt: new Date(targetStarted).toISOString(),
-      finishedAt: new Date().toISOString(),
-      durationMs: Date.now() - targetStarted,
-    });
-  }
+      return {
+        targetId: target.id,
+        targetPath: target.path,
+        totalSize: scanResult.totalSize,
+        directories: scanResult.directories,
+        startedAt: new Date(targetStarted).toISOString(),
+        finishedAt: new Date().toISOString(),
+        durationMs: Date.now() - targetStarted,
+      };
+    }
+  );
 
   const finishedAt = new Date().toISOString();
 

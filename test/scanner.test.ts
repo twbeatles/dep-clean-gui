@@ -43,4 +43,35 @@ describe('scanDirectories', () => {
     assert.equal(excluded.directories.length, 1);
     assert.equal(excluded.directories[0].name, 'node_modules');
   });
+
+  it('supports path-like targets such as vendor/bundle', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-scan-path-target-'));
+    tempRoots.push(root);
+
+    const bundlePath = path.join(root, 'project-a', 'vendor', 'bundle');
+    const plainVendor = path.join(root, 'project-b', 'vendor');
+
+    mkdirSync(bundlePath, { recursive: true });
+    mkdirSync(plainVendor, { recursive: true });
+
+    writeFileSync(path.join(bundlePath, 'cached.bin'), 'hello');
+    writeFileSync(path.join(plainVendor, 'plain.txt'), 'hello');
+
+    const result = await scanDirectories({
+      targetDir: root,
+      only: ['vendor/bundle'],
+    });
+
+    assert.equal(result.directories.length, 1);
+    assert.equal(result.directories[0].path, bundlePath);
+    assert.equal(result.directories[0].name, 'bundle');
+  });
+
+  it('returns empty result when target directory is not readable', async () => {
+    const missing = path.join(os.tmpdir(), `dep-clean-missing-${Date.now()}`);
+    const result = await scanDirectories({ targetDir: missing });
+
+    assert.equal(result.directories.length, 0);
+    assert.equal(result.totalSize, 0);
+  });
 });
