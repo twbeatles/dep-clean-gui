@@ -68,6 +68,12 @@ This file mirrors `cladue.md` but is formatted for another AI workflow.
 
 ## Windows Preload + i18n Snapshot (2026-03)
 
+- **Comprehensive UI/UX Refactoring**:
+  - Redesigned CSS with modern left sidebar and dashboard layout
+  - Grouped run controls and distinct metrics with SVG icons
+  - Refactored settings inputs with custom CSS toggle switches
+  - Updated renderer i18n terms to be user-friendly (ko/en)
+  - Applied panel, empty-state, and button hover animations
 - Packaged preload now runs as CommonJS (`dist/electron/preload.cjs`) to avoid Electron sandbox preload parse errors.
 - Main process preload target is explicitly `preload.cjs`.
 - Locale selection is automatic:

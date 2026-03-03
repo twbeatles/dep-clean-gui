@@ -61,6 +61,12 @@ The filename intentionally follows project request: `cladue.md`.
 
 ## Windows Packaging + i18n Snapshot (2026-03)
 
+- **Comprehensive UI/UX Refactoring**:
+  - Transitioned from top-tabs to a modern left sidebar + main content layout
+  - Dashboard metrics are visually distinct with SVG icons and grouped run controls
+  - Replaced native checkboxes with custom CSS toggle switches
+  - User-friendly English and Korean locale strings with updated terminology
+  - Added subtle entry, hover, and state transition animations
 - Preload bridge stability:
   - preload source is TypeScript CommonJS entry (`electron/preload.cts`)
   - packaged runtime uses `dist/electron/preload.cjs`

@@ -67,8 +67,14 @@ dep-clean --only node_modules,venv
 dep-clean --exclude vendor,Pods
 ```
 
-## Performance Optimization Notes
+## Documentation and Performance Snapshot (2026-03)
 
+- **Comprehensive UI/UX Refactoring**:
+  - CSS design system redesigned (left sidebar + main content layout).
+  - Dashboard metrics visual hierarchy strengthened and buttons grouped by intent.
+  - Custom SVG icons and state toggle switches introduced.
+  - User-friendly i18n strings in English and Korean.
+  - Applied subtle animations for panel entry, hover, and state changes.
 - Scanner core uses iterative traversal + bounded file stat concurrency.
 - Multi-target scans run with bounded parallelism for faster watch/set runs.
 - Watch engine now rebuilds watchers only when watcher-relevant settings change.

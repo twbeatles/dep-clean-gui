@@ -25,6 +25,7 @@ const PREVIEW_PAGE_SIZE = 200;
 const ALERT_PAGE_SIZE = 200;
 const ALERT_HISTORY_MAX = 5000;
 
+/* ─── Utility Functions ─────────────────────────────────────── */
 function bytesToText(bytes: number): string {
   if (bytes <= 0) return '0 B';
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -58,7 +59,6 @@ function buildSetName(paths: string[], t: RendererTranslator): string {
     const tokens = paths[0].split(/[/\\]/g).filter(Boolean);
     return t('setName.single', { name: tokens[tokens.length - 1] ?? 'scan' });
   }
-
   return t('setName.multiple', {
     count: paths.length,
     date: new Date().toLocaleDateString(),
@@ -95,6 +95,82 @@ function getDepCleanApi(): DepCleanApi | null {
   return api ?? null;
 }
 
+/* ─── SVG Icons ──────────────────────────────────────────────── */
+const IconDashboard = () => (
+  <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="1" y="1" width="7" height="7" rx="1.5" />
+    <rect x="10" y="1" width="7" height="7" rx="1.5" />
+    <rect x="1" y="10" width="7" height="7" rx="1.5" />
+    <rect x="10" y="10" width="7" height="7" rx="1.5" />
+  </svg>
+);
+const IconScanSets = () => (
+  <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 2v4M9 12v4M2 9h4M12 9h4" />
+    <circle cx="9" cy="9" r="3" />
+  </svg>
+);
+const IconSettings = () => (
+  <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="9" cy="9" r="2.5" />
+    <path d="M9 1v2M9 15v2M1 9h2M15 9h2M3.3 3.3l1.4 1.4M13.3 13.3l1.4 1.4M3.3 14.7l1.4-1.4M13.3 4.7l1.4-1.4" />
+  </svg>
+);
+const IconAlerts = () => (
+  <svg className="nav-icon" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M9 1.5L2 13.5h14L9 1.5z" />
+    <path d="M9 7v3M9 12.5v.5" />
+  </svg>
+);
+const IconFolder = () => (
+  <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M1 4.5A1.5 1.5 0 012.5 3h4l1.5 2H15.5A1.5 1.5 0 0117 6.5v7A1.5 1.5 0 0115.5 15h-13A1.5 1.5 0 011 13.5v-9z" />
+  </svg>
+);
+const IconSize = () => (
+  <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="9" cy="9" r="7" />
+    <path d="M6 9h6M9 6v6" />
+  </svg>
+);
+const IconClock = () => (
+  <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+    <circle cx="9" cy="9" r="7" />
+    <path d="M9 5v4l2.5 2.5" />
+  </svg>
+);
+const IconEmpty = () => (
+  <svg className="empty-state-icon" viewBox="0 0 40 40" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="6" y="10" width="28" height="24" rx="3" />
+    <path d="M6 16h28M14 10V6M26 10V6" />
+    <path d="M14 24l4 4 8-8" opacity="0.5" />
+  </svg>
+);
+
+/* ─── Toggle Switch Component ────────────────────────────────── */
+interface ToggleRowProps {
+  label: string;
+  description?: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}
+
+const ToggleRow = memo(function ToggleRow({ label, description, checked, onChange }: ToggleRowProps) {
+  return (
+    <div className="toggle-row">
+      <div className="toggle-label-group">
+        <span className="toggle-label">{label}</span>
+        {description && <span className="toggle-description">{description}</span>}
+      </div>
+      <label className="toggle-switch">
+        <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
+        <span className="toggle-track" />
+      </label>
+    </div>
+  );
+});
+
+/* ─── Startup Choice Modal ───────────────────────────────────── */
 interface StartupChoiceModalProps {
   busy: boolean;
   t: RendererTranslator;
@@ -126,6 +202,7 @@ const StartupChoiceModal = memo(function StartupChoiceModal({
   );
 });
 
+/* ─── Alerts Section ─────────────────────────────────────────── */
 interface AlertsSectionProps {
   alerts: ThresholdAlert[];
   alertPage: number;
@@ -150,7 +227,7 @@ const AlertsSection = memo(function AlertsSection({
   return (
     <section className="panel">
       <div className="panel-header">
-        <h2>{t('alerts.title')}</h2>
+        <h2 className="panel-title">{t('alerts.title')}</h2>
         <div className="button-row">
           <button className="btn" onClick={onMarkAllRead}>
             {t('alerts.markAllRead')}
@@ -161,38 +238,53 @@ const AlertsSection = memo(function AlertsSection({
         </div>
       </div>
 
-      <div className="alert-list">
-        {alerts.map((alert) => (
-          <article key={alert.id} className={alert.read ? 'alert-card read' : 'alert-card'}>
-            <header>
-              <strong>
-                {alert.status === 'exceeded'
-                  ? t('alerts.status.exceeded')
-                  : t('alerts.status.resolved')}
-              </strong>
-              <span>{alert.scope === 'global' ? t('alerts.scope.global') : alert.targetPath ?? alert.targetId}</span>
-            </header>
-            <p>
-              {bytesToText(alert.currentBytes)} {t('alerts.thresholdLabel', { value: bytesToText(alert.thresholdBytes) })}
-            </p>
-            <time>{timestampText(alert.timestamp)}</time>
-          </article>
-        ))}
-      </div>
+      {alerts.length === 0 ? (
+        <div className="empty-state">
+          <IconEmpty />
+          <p>알림 이력이 없습니다</p>
+        </div>
+      ) : (
+        <div className="alert-list">
+          {alerts.map((alert) => (
+            <article
+              key={alert.id}
+              className={`alert-card ${alert.status} ${alert.read ? 'read' : ''}`}
+            >
+              <div className="alert-card-header">
+                <span className={`alert-badge ${alert.status}`}>
+                  {alert.status === 'exceeded'
+                    ? t('alerts.status.exceeded')
+                    : t('alerts.status.resolved')}
+                </span>
+                <span className="alert-scope">
+                  {alert.scope === 'global' ? t('alerts.scope.global') : (alert.targetPath ?? alert.targetId)}
+                </span>
+              </div>
+              <p className="alert-detail">
+                {bytesToText(alert.currentBytes)} {t('alerts.thresholdLabel', { value: bytesToText(alert.thresholdBytes) })}
+              </p>
+              <time className="alert-time">{timestampText(alert.timestamp)}</time>
+            </article>
+          ))}
+        </div>
+      )}
 
-      <div className="button-row">
-        <button className="btn" disabled={alertPage <= 1} onClick={onPreviousPage}>
-          {t('pagination.previous')}
-        </button>
-        <span className="muted">{t('pagination.pageOf', { current: alertPage, total: alertPageCount })}</span>
-        <button className="btn" disabled={alertPage >= alertPageCount} onClick={onNextPage}>
-          {t('pagination.next')}
-        </button>
-      </div>
+      {alertPageCount > 1 && (
+        <div className="pagination-row">
+          <button className="btn" disabled={alertPage <= 1} onClick={onPreviousPage}>
+            {t('pagination.previous')}
+          </button>
+          <span className="pagination-label">{t('pagination.pageOf', { current: alertPage, total: alertPageCount })}</span>
+          <button className="btn" disabled={alertPage >= alertPageCount} onClick={onNextPage}>
+            {t('pagination.next')}
+          </button>
+        </div>
+      )}
     </section>
   );
 });
 
+/* ─── Cleanup Preview Modal ──────────────────────────────────── */
 interface CleanupPreviewModalProps {
   preview: CleanupPreview;
   busy: boolean;
@@ -233,13 +325,14 @@ const CleanupPreviewModal = memo(function CleanupPreviewModal({
       <div className="modal">
         <h2>{t('cleanup.title')}</h2>
         <p>{t('cleanup.previewCreatedAt', { value: timestampText(preview.createdAt) })}</p>
-        <p>
+
+        <div className="modal-summary">
           {t('cleanup.selectedSummary', {
             selected: selectedDeletePaths.size,
             total: preview.directories.length,
             size: bytesToText(selectedPreviewSize),
           })}
-        </p>
+        </div>
 
         <div className="modal-actions">
           <button className="btn" onClick={onSelectAll}>
@@ -264,15 +357,17 @@ const CleanupPreviewModal = memo(function CleanupPreviewModal({
           ))}
         </div>
 
-        <div className="button-row">
-          <button className="btn" disabled={previewPage <= 1} onClick={onPreviousPage}>
-            {t('pagination.previous')}
-          </button>
-          <span className="muted">{t('pagination.pageOf', { current: previewPage, total: previewPageCount })}</span>
-          <button className="btn" disabled={previewPage >= previewPageCount} onClick={onNextPage}>
-            {t('pagination.next')}
-          </button>
-        </div>
+        {previewPageCount > 1 && (
+          <div className="pagination-row">
+            <button className="btn" disabled={previewPage <= 1} onClick={onPreviousPage}>
+              {t('pagination.previous')}
+            </button>
+            <span className="pagination-label">{t('pagination.pageOf', { current: previewPage, total: previewPageCount })}</span>
+            <button className="btn" disabled={previewPage >= previewPageCount} onClick={onNextPage}>
+              {t('pagination.next')}
+            </button>
+          </div>
+        )}
 
         <div className="modal-actions">
           <button className="btn" onClick={onCancel}>
@@ -287,16 +382,17 @@ const CleanupPreviewModal = memo(function CleanupPreviewModal({
   );
 });
 
+/* ─── Main App ───────────────────────────────────────────────── */
 export default function App() {
   const locale = useMemo(() => normalizeSupportedLocale(navigator.language), []);
   const t = useMemo(() => createRendererTranslator(locale), [locale]);
 
-  const tabLabels = useMemo(
+  const NAV_ITEMS: { key: TabKey; label: string; Icon: () => JSX.Element }[] = useMemo(
     () => [
-      { key: 'dashboard' as const, label: t('tab.dashboard') },
-      { key: 'scanSets' as const, label: t('tab.scanSets') },
-      { key: 'settings' as const, label: t('tab.settings') },
-      { key: 'alerts' as const, label: t('tab.alerts') },
+      { key: 'dashboard', label: t('tab.dashboard'), Icon: IconDashboard },
+      { key: 'scanSets', label: t('tab.scanSets'), Icon: IconScanSets },
+      { key: 'settings', label: t('tab.settings'), Icon: IconSettings },
+      { key: 'alerts', label: t('tab.alerts'), Icon: IconAlerts },
     ],
     [t]
   );
@@ -363,16 +459,12 @@ export default function App() {
     options?: { withBusy?: boolean; successMessage?: string }
   ): Promise<void> {
     if (Object.keys(patch).length === 0) return;
-
     const withBusy = options?.withBusy ?? false;
-
     try {
       if (withBusy) setBusy(true);
       const next = await window.depClean.settings.update(patch);
       setSettings(next);
-      if (options?.successMessage) {
-        setMessage(options.successMessage);
-      }
+      if (options?.successMessage) setMessage(options.successMessage);
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -413,13 +505,11 @@ export default function App() {
         api.alerts.list({ limit: ALERT_HISTORY_MAX }),
         api.scan.getLastResult(),
       ]);
-
       setSettings(nextSettings);
       setWatchStatus(nextStatus);
       setAlerts(nextAlerts);
       setLastScan(nextScan);
       setShowStartupChoiceModal(!nextSettings.startupChoiceCompleted);
-
       if (nextSettings.scanSets.length > 0) {
         setSelectedSetId(nextSettings.scanSets[0].id);
       }
@@ -427,6 +517,7 @@ export default function App() {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
   }
+
   useEffect(() => {
     document.documentElement.lang = locale;
   }, [locale]);
@@ -435,32 +526,20 @@ export default function App() {
     const api = getDepCleanApi();
     if (!api) {
       setErrorMessage(t('error.ipcUnavailable'));
-      return () => {
-        clearPendingSettingsTimer();
-      };
+      return () => { clearPendingSettingsTimer(); };
     }
-
     void bootstrap(api);
-
-    const unsubscribeProgress = api.scan.onProgress((event) => {
-      setProgress(event);
-    });
-
+    const unsubscribeProgress = api.scan.onProgress((event) => { setProgress(event); });
     const unsubscribeCompleted = api.scan.onCompleted((outcome) => {
       setProgress(null);
       setLastOutcome(outcome);
       setLastScan(outcome.scanResult);
     });
-
-    const unsubscribeStatus = api.watch.onStatusChanged((status) => {
-      setWatchStatus(status);
-    });
-
+    const unsubscribeStatus = api.watch.onStatusChanged((status) => { setWatchStatus(status); });
     const unsubscribeAlerts = api.alerts.onCreated((created) => {
       setAlerts((prev) => [...created, ...prev].slice(0, ALERT_HISTORY_MAX));
       setAlertPage(1);
     });
-
     return () => {
       unsubscribeProgress();
       unsubscribeCompleted();
@@ -474,10 +553,7 @@ export default function App() {
     setAlertPage((current) => Math.min(current, alertPageCount));
   }, [alertPageCount]);
 
-  useEffect(() => {
-    setPreviewPage(1);
-  }, [preview?.approvalId]);
-
+  useEffect(() => { setPreviewPage(1); }, [preview?.approvalId]);
   useEffect(() => {
     setPreviewPage((current) => Math.min(current, previewPageCount));
   }, [previewPageCount]);
@@ -495,12 +571,10 @@ export default function App() {
       setLastScan(outcome.scanResult);
       const nextAlerts = await window.depClean.alerts.list({ limit: ALERT_HISTORY_MAX });
       setAlerts(nextAlerts);
-      setMessage(
-        t('message.scanComplete', {
-          count: outcome.scanResult.directoryCount,
-          size: bytesToText(outcome.scanResult.totalSize),
-        })
-      );
+      setMessage(t('message.scanComplete', {
+        count: outcome.scanResult.directoryCount,
+        size: bytesToText(outcome.scanResult.totalSize),
+      }));
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -514,7 +588,6 @@ export default function App() {
       ? settings?.scanSets.find((scanSet) => scanSet.id === setId) ?? null
       : selectedSet;
     if (!targetSet) return;
-
     try {
       await flushPendingSettings();
       setBusy(true);
@@ -564,21 +637,12 @@ export default function App() {
 
   async function addWatchTargets() {
     if (!settings) return;
-
     const picked = await window.depClean.folders.pickMany();
     if (picked.length === 0) return;
-
     const existing = new Set(settings.watchTargets.map((target) => target.path));
     const additions = picked.filter((item) => !existing.has(item)).map((item) => createTarget(item));
-
-    if (additions.length === 0) {
-      setMessage(t('message.noNewFolders'));
-      return;
-    }
-
-    await updateSettings({
-      watchTargets: [...settings.watchTargets, ...additions],
-    });
+    if (additions.length === 0) { setMessage(t('message.noNewFolders')); return; }
+    await updateSettings({ watchTargets: [...settings.watchTargets, ...additions] });
   }
 
   function patchWatchTarget(
@@ -591,10 +655,7 @@ export default function App() {
       if (target.id !== targetId) return target;
       return { ...target, ...patch };
     });
-    if (mode === 'debounced') {
-      queueSettingsUpdate({ watchTargets: nextTargets });
-      return;
-    }
+    if (mode === 'debounced') { queueSettingsUpdate({ watchTargets: nextTargets }); return; }
     void updateSettings({ watchTargets: nextTargets });
   }
 
@@ -608,7 +669,6 @@ export default function App() {
     if (!settings) return;
     const picked = await window.depClean.folders.pickMany();
     if (picked.length === 0) return;
-
     const now = new Date().toISOString();
     const scanSet: ScanSet = {
       id: crypto.randomUUID(),
@@ -617,10 +677,8 @@ export default function App() {
       createdAt: now,
       updatedAt: now,
     };
-
     const nextSets = [...settings.scanSets, scanSet];
     await updateSettings({ scanSets: nextSets });
-
     setNewSetName('');
     setSelectedSetId(scanSet.id);
   }
@@ -629,10 +687,7 @@ export default function App() {
     if (!settings) return;
     const nextSets = settings.scanSets.filter((scanSet) => scanSet.id !== setId);
     void updateSettings({ scanSets: nextSets });
-
-    if (selectedSetId === setId) {
-      setSelectedSetId(nextSets[0]?.id ?? '');
-    }
+    if (selectedSetId === setId) setSelectedSetId(nextSets[0]?.id ?? '');
   }
 
   async function openCleanupPreview(paths?: string[]) {
@@ -653,7 +708,6 @@ export default function App() {
 
   async function confirmCleanup() {
     if (!preview) return;
-
     try {
       setBusy(true);
       const result = await window.depClean.cleanup.confirmDelete(
@@ -662,19 +716,15 @@ export default function App() {
       );
       setPreview(null);
       setSelectedDeletePaths(new Set());
-      setMessage(
-        t('message.cleanupComplete', {
-          count: result.deletedCount,
-          size: bytesToText(result.freedSize),
-        })
-      );
-
+      setMessage(t('message.cleanupComplete', {
+        count: result.deletedCount,
+        size: bytesToText(result.freedSize),
+      }));
       if (result.failures.length > 0) {
         setErrorMessage(t('error.someDeletesFailed', { count: result.failures.length }));
       } else {
         setErrorMessage('');
       }
-
       await runManualScan(selectedSet?.paths);
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
@@ -700,18 +750,11 @@ export default function App() {
     const successMessage = enableAutoStart
       ? t('message.startupAutoStartEnabled')
       : t('message.startupAutoStartDisabled');
-
-    await updateSettingsNow(
-      {
-        autoStart: enableAutoStart,
-        startupChoiceCompleted: true,
-        runInTray: true,
-      },
-      successMessage
-    );
-
+    await updateSettingsNow({ autoStart: enableAutoStart, startupChoiceCompleted: true, runInTray: true }, successMessage);
     setShowStartupChoiceModal(false);
   }
+
+  /* ─── Loading State ─────────────────────────────────────────── */
   if (!settings || !watchStatus) {
     return (
       <div className="loading">
@@ -723,372 +766,437 @@ export default function App() {
     );
   }
 
+  const isMonitoring = watchStatus.running;
+  const unreadCount = alerts.filter((a) => !a.read).length;
+
+  /* ─── Progress percentage ─────────────────────────────────── */
+  const progressPct = progress && progress.total > 0
+    ? Math.round((progress.current / progress.total) * 100)
+    : 0;
+
   return (
     <div className="app-shell">
-      <header className="top-header">
-        <div>
-          <p className="eyebrow">{t('header.eyebrow')}</p>
-          <h1>{t('header.title')}</h1>
-          <p className="subtitle">{t('header.subtitle')}</p>
+      {/* ── Sidebar ──────────────────────────────────────────── */}
+      <aside className="sidebar">
+        <div className="sidebar-brand">
+          <p className="sidebar-eyebrow">{t('header.eyebrow')}</p>
+          <h1 className="sidebar-title">{t('header.title')}</h1>
+          <p className="sidebar-subtitle">{t('header.subtitle')}</p>
         </div>
-        <div className="status-pills">
-          <span className={`pill ${watchStatus.running ? 'ok' : 'idle'}`}>
-            {watchStatus.running ? t('header.monitoringOn') : t('header.monitoringOff')}
+
+        <div className="sidebar-status">
+          <span className={`pill ${isMonitoring ? 'ok' : 'idle'}`}>
+            {isMonitoring ? t('header.monitoringOn') : t('header.monitoringOff')}
           </span>
-          <span className="pill neutral">{t('header.watchers', { count: watchStatus.watcherCount })}</span>
+          {watchStatus.watcherCount > 0 && (
+            <span className="pill neutral">{t('header.watchers', { count: watchStatus.watcherCount })}</span>
+          )}
         </div>
-      </header>
 
-      <nav className="tabs">
-        {tabLabels.map((tab) => (
-          <button
-            key={tab.key}
-            className={activeTab === tab.key ? 'tab active' : 'tab'}
-            onClick={() => setActiveTab(tab.key)}
-          >
-            {tab.label}
-          </button>
-        ))}
-      </nav>
+        <nav className="sidebar-nav">
+          {NAV_ITEMS.map(({ key, label, Icon }) => (
+            <button
+              key={key}
+              className={`nav-item ${activeTab === key ? 'active' : ''}`}
+              onClick={() => setActiveTab(key)}
+            >
+              <Icon />
+              <span>{label}</span>
+              {key === 'alerts' && unreadCount > 0 && (
+                <span className="tag" style={{ marginLeft: 'auto', fontSize: '0.68rem' }}>
+                  {unreadCount}
+                </span>
+              )}
+            </button>
+          ))}
+        </nav>
 
-      <main className="content-grid">
-        {activeTab === 'dashboard' && (
-          <section className="panel">
-            <div className="panel-header">
-              <h2>{t('dashboard.runControls')}</h2>
-              <div className="button-row">
-                <button className="btn primary" disabled={busy} onClick={() => void runManualScan()}>
-                  {t('dashboard.manualScan')}
-                </button>
-                <button className="btn" disabled={busy || !selectedSet} onClick={() => void runSelectedSet()}>
-                  {t('dashboard.runScanSet')}
-                </button>
-                <button className="btn" disabled={busy} onClick={() => void openCleanupPreview()}>
-                  {t('dashboard.buildCleanupApproval')}
-                </button>
-                <button className="btn" disabled={busy || watchStatus.running} onClick={() => void startWatch()}>
-                  {t('dashboard.startMonitor')}
-                </button>
-                <button className="btn danger" disabled={busy || !watchStatus.running} onClick={() => void stopWatch()}>
-                  {t('dashboard.stopMonitor')}
-                </button>
-              </div>
-            </div>
+        <div className="sidebar-footer">
+          dep-clean-gui
+        </div>
+      </aside>
 
-            <div className="metrics-row">
-              <article className="metric-card">
-                <h3>{t('dashboard.latestTotalSize')}</h3>
-                <p>{bytesToText(lastScan?.totalSize ?? 0)}</p>
-              </article>
-              <article className="metric-card">
-                <h3>{t('dashboard.latestDirectoryCount')}</h3>
-                <p>{lastScan?.directoryCount ?? 0}</p>
-              </article>
-              <article className="metric-card">
-                <h3>{t('dashboard.nextPeriodicRun')}</h3>
-                <p>{watchStatus.nextRunAt ? timestampText(watchStatus.nextRunAt) : t('dashboard.disabled')}</p>
-              </article>
-            </div>
-
-            {progress && (
-              <div className="inline-note">
-                {t('dashboard.scanProgress', {
-                  current: progress.current,
-                  total: progress.total,
-                  path: progress.targetPath,
-                })}
-              </div>
-            )}
-
-            {lastOutcome && lastOutcome.alerts.length > 0 && (
-              <div className="inline-note warning">
-                {t('dashboard.lastScanAlertCount', { count: lastOutcome.alerts.length })}
-              </div>
-            )}
-
-            <div className="scan-results">
-              {(lastScan?.targets ?? []).map((target) => (
-                <article key={target.targetId} className="result-card">
-                  <header>
-                    <h3>{target.targetPath}</h3>
-                    <span>{bytesToText(target.totalSize)}</span>
-                  </header>
-                  <ul>
-                    {target.directories.slice(0, 8).map((dir) => (
-                      <li key={dir.path}>
-                        <code>{dir.relativePath}</code>
-                        <span>{bytesToText(dir.size)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                  {target.directories.length > 8 && (
-                    <p className="muted">
-                      {t('dashboard.moreDirectories', { count: target.directories.length - 8 })}
-                    </p>
-                  )}
-                </article>
-              ))}
-            </div>
-          </section>
+      {/* ── Main Area ─────────────────────────────────────────── */}
+      <div className="main-area">
+        {/* Status Banner */}
+        {(message || errorMessage) && (
+          <div className={`status-banner ${errorMessage ? 'has-error' : 'has-ok'}`}>
+            {message && <p className="ok-text">{message}</p>}
+            {errorMessage && <p className="error-text">{errorMessage}</p>}
+          </div>
         )}
 
-        {activeTab === 'scanSets' && (
-          <section className="panel">
-            <div className="panel-header">
-              <h2>{t('scanSets.title')}</h2>
-            </div>
+        <div className="main-content">
+          {/* ── Dashboard Tab ───────────────────────────────── */}
+          {activeTab === 'dashboard' && (
+            <section className="panel">
+              <div className="panel-header">
+                <h2 className="panel-title">{t('tab.dashboard')}</h2>
+              </div>
 
-            <div className="inline-form">
-              <input
-                placeholder={t('scanSets.newSetPlaceholder')}
-                value={newSetName}
-                onChange={(event) => setNewSetName(event.target.value)}
-              />
-              <button className="btn primary" disabled={busy} onClick={() => void createScanSet()}>
-                {t('scanSets.pickFoldersSave')}
-              </button>
-            </div>
-
-            <div className="set-list">
-              {settings.scanSets.map((scanSet) => (
-                <article key={scanSet.id} className={selectedSetId === scanSet.id ? 'set-card active' : 'set-card'}>
-                  <header>
-                    <label>
-                      <input
-                        type="radio"
-                        checked={selectedSetId === scanSet.id}
-                        onChange={() => setSelectedSetId(scanSet.id)}
-                      />
-                      <strong>{scanSet.name}</strong>
-                    </label>
-                    <span>{t('scanSets.folderCount', { count: scanSet.paths.length })}</span>
-                  </header>
-                  <ul>
-                    {scanSet.paths.map((targetPath) => (
-                      <li key={targetPath}>
-                        <code>{targetPath}</code>
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="button-row">
-                    <button
-                      className="btn"
-                      disabled={busy}
-                      onClick={() => {
-                        setSelectedSetId(scanSet.id);
-                        void runSelectedSet(scanSet.id);
-                      }}
-                    >
-                      {t('scanSets.runSet')}
-                    </button>
-                    <button
-                      className="btn"
-                      disabled={busy}
-                      onClick={() => {
-                        setSelectedSetId(scanSet.id);
-                        void openCleanupPreview(scanSet.paths);
-                      }}
-                    >
-                      {t('scanSets.buildCleanup')}
-                    </button>
-                    <button className="btn danger" disabled={busy} onClick={() => deleteScanSet(scanSet.id)}>
-                      {t('scanSets.deleteSet')}
-                    </button>
+              {/* Metrics */}
+              <div className="metrics-row">
+                <article className="metric-card">
+                  <div className="metric-icon"><IconSize /></div>
+                  <div className="metric-label">{t('dashboard.latestTotalSize')}</div>
+                  <div className="metric-value">{bytesToText(lastScan?.totalSize ?? 0)}</div>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-icon"><IconFolder /></div>
+                  <div className="metric-label">{t('dashboard.latestDirectoryCount')}</div>
+                  <div className="metric-value">{lastScan?.directoryCount ?? 0}</div>
+                </article>
+                <article className="metric-card">
+                  <div className="metric-icon"><IconClock /></div>
+                  <div className="metric-label">{t('dashboard.nextPeriodicRun')}</div>
+                  <div className="metric-value" style={{ fontSize: '0.9rem' }}>
+                    {watchStatus.nextRunAt ? timestampText(watchStatus.nextRunAt) : t('dashboard.disabled')}
                   </div>
                 </article>
-              ))}
-            </div>
-          </section>
-        )}
+              </div>
 
-        {activeTab === 'settings' && (
-          <section className="panel">
-            <div className="panel-header">
-              <h2>{t('settings.title')}</h2>
-            </div>
+              <div className="panel-divider" />
 
-            <div className="settings-grid">
-              <label>
-                <span>{t('settings.autoStartOnLogin')}</span>
+              {/* Scan Section */}
+              <div className="section-block">
+                <div className="section-block-title">{t('dashboard.runControls')}</div>
+                <div className="button-row">
+                  <button className="btn primary" disabled={busy} onClick={() => void runManualScan()}>
+                    {t('dashboard.manualScan')}
+                  </button>
+                  <button className="btn" disabled={busy || !selectedSet} onClick={() => void runSelectedSet()}>
+                    {t('dashboard.runScanSet')}
+                  </button>
+                  <button className="btn" disabled={busy} onClick={() => void openCleanupPreview()}>
+                    {t('dashboard.buildCleanupApproval')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Monitor Section */}
+              <div className="section-block">
+                <div className="section-block-title">Monitor</div>
+                <div className="button-row">
+                  <button className="btn primary" disabled={busy || isMonitoring} onClick={() => void startWatch()}>
+                    {t('dashboard.startMonitor')}
+                  </button>
+                  <button className="btn danger" disabled={busy || !isMonitoring} onClick={() => void stopWatch()}>
+                    {t('dashboard.stopMonitor')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Progress */}
+              {progress && (
+                <div className="inline-note">
+                  <div style={{ marginBottom: 6 }}>
+                    {t('dashboard.scanProgress', {
+                      current: progress.current,
+                      total: progress.total,
+                      path: progress.targetPath,
+                    })}
+                  </div>
+                  <div className="progress-bar-wrap">
+                    <div className="progress-bar-fill" style={{ width: `${progressPct}%` }} />
+                  </div>
+                </div>
+              )}
+
+              {lastOutcome && lastOutcome.alerts.length > 0 && (
+                <div className="inline-note warning">
+                  {t('dashboard.lastScanAlertCount', { count: lastOutcome.alerts.length })}
+                </div>
+              )}
+
+              {/* Scan Results */}
+              {(lastScan?.targets ?? []).length > 0 && (
+                <>
+                  <div className="panel-divider" />
+                  <div className="scan-results">
+                    {(lastScan?.targets ?? []).map((target) => (
+                      <article key={target.targetId} className="result-card">
+                        <div className="result-card-header">
+                          <h3 className="result-card-path">{target.targetPath}</h3>
+                          <span className="result-card-size">{bytesToText(target.totalSize)}</span>
+                        </div>
+                        <ul>
+                          {target.directories.slice(0, 8).map((dir) => (
+                            <li key={dir.path}>
+                              <code>{dir.relativePath}</code>
+                              <span>{bytesToText(dir.size)}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {target.directories.length > 8 && (
+                          <p className="more-label">
+                            {t('dashboard.moreDirectories', { count: target.directories.length - 8 })}
+                          </p>
+                        )}
+                      </article>
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
+
+          {/* ── Scan Sets Tab ────────────────────────────────── */}
+          {activeTab === 'scanSets' && (
+            <section className="panel">
+              <div className="panel-header">
+                <h2 className="panel-title">{t('scanSets.title')}</h2>
+              </div>
+
+              <div className="inline-form">
                 <input
-                  type="checkbox"
+                  placeholder={t('scanSets.newSetPlaceholder')}
+                  value={newSetName}
+                  onChange={(event) => setNewSetName(event.target.value)}
+                />
+                <button className="btn primary" disabled={busy} onClick={() => void createScanSet()}>
+                  {t('scanSets.pickFoldersSave')}
+                </button>
+              </div>
+
+              {settings.scanSets.length === 0 ? (
+                <div className="empty-state">
+                  <IconEmpty />
+                  <p>스캔 세트가 없습니다. 폴더를 선택해 세트를 추가하세요.</p>
+                </div>
+              ) : (
+                <div className="set-list">
+                  {settings.scanSets.map((scanSet) => (
+                    <article key={scanSet.id} className={selectedSetId === scanSet.id ? 'set-card active' : 'set-card'}>
+                      <div className="set-card-header">
+                        <label>
+                          <input
+                            type="radio"
+                            checked={selectedSetId === scanSet.id}
+                            onChange={() => setSelectedSetId(scanSet.id)}
+                          />
+                          <strong>{scanSet.name}</strong>
+                        </label>
+                        <span className="tag">{t('scanSets.folderCount', { count: scanSet.paths.length })}</span>
+                      </div>
+                      <ul>
+                        {scanSet.paths.map((targetPath) => (
+                          <li key={targetPath}><code>{targetPath}</code></li>
+                        ))}
+                      </ul>
+                      <div className="button-row">
+                        <button
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => { setSelectedSetId(scanSet.id); void runSelectedSet(scanSet.id); }}
+                        >
+                          {t('scanSets.runSet')}
+                        </button>
+                        <button
+                          className="btn"
+                          disabled={busy}
+                          onClick={() => { setSelectedSetId(scanSet.id); void openCleanupPreview(scanSet.paths); }}
+                        >
+                          {t('scanSets.buildCleanup')}
+                        </button>
+                        <button className="btn danger" disabled={busy} onClick={() => deleteScanSet(scanSet.id)}>
+                          {t('scanSets.deleteSet')}
+                        </button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* ── Settings Tab ─────────────────────────────────── */}
+          {activeTab === 'settings' && (
+            <section className="panel">
+              <div className="panel-header">
+                <h2 className="panel-title">{t('settings.title')}</h2>
+              </div>
+
+              {/* General toggles */}
+              <div className="settings-general">
+                <ToggleRow
+                  label={t('settings.autoStartOnLogin')}
                   checked={settings.autoStart}
-                  onChange={(event) => void updateSettings({ autoStart: event.target.checked })}
+                  onChange={(checked) => void updateSettings({ autoStart: checked })}
                 />
-              </label>
-
-              <label>
-                <span>{t('settings.enablePeriodicScans')}</span>
-                <input
-                  type="checkbox"
+                <ToggleRow
+                  label={t('settings.enablePeriodicScans')}
                   checked={settings.periodicEnabled}
-                  onChange={(event) => void updateSettings({ periodicEnabled: event.target.checked })}
+                  onChange={(checked) => void updateSettings({ periodicEnabled: checked })}
                 />
-              </label>
-
-              <label>
-                <span>{t('settings.enableRealtimeWatch')}</span>
-                <input
-                  type="checkbox"
+                <ToggleRow
+                  label={t('settings.enableRealtimeWatch')}
                   checked={settings.realtimeEnabled}
-                  onChange={(event) => void updateSettings({ realtimeEnabled: event.target.checked })}
+                  onChange={(checked) => void updateSettings({ realtimeEnabled: checked })}
                 />
-              </label>
+              </div>
 
-              <label>
-                <span>{t('settings.periodicIntervalMin')}</span>
-                <input
-                  type="number"
-                  min={5}
-                  max={1440}
-                  value={settings.periodicMinutes}
-                  onChange={(event) =>
-                    queueSettingsUpdate({ periodicMinutes: Number.parseInt(event.target.value || '60', 10) })
-                  }
-                  onBlur={() => void flushPendingSettings()}
-                />
-              </label>
-
-              <label>
-                <span>{t('settings.globalThresholdMb')}</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={bytesToMbInput(settings.globalThresholdBytes)}
-                  onChange={(event) =>
-                    queueSettingsUpdate({
-                      globalThresholdBytes: mbInputToBytes(Number.parseInt(event.target.value || '0', 10)),
-                    })
-                  }
-                  onBlur={() => void flushPendingSettings()}
-                />
-              </label>
-
-              <label>
-                <span>{t('settings.alertCooldownMin')}</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={settings.alertCooldownMinutes}
-                  onChange={(event) =>
-                    queueSettingsUpdate({ alertCooldownMinutes: Number.parseInt(event.target.value || '0', 10) })
-                  }
-                  onBlur={() => void flushPendingSettings()}
-                />
-              </label>
-            </div>
-
-            <div className="inline-note">{t('settings.trayPolicyNote')}</div>
-
-            <div className="panel-header">
-              <h2>{t('settings.watchTargets')}</h2>
-              <button className="btn primary" disabled={busy} onClick={() => void addWatchTargets()}>
-                {t('settings.addFolders')}
-              </button>
-            </div>
-
-            <div className="target-list">
-              {settings.watchTargets.map((target) => (
-                <article key={target.id} className="target-card">
-                  <div className="target-top">
-                    <label>
-                      <input
-                        type="checkbox"
-                        checked={target.enabled}
-                        onChange={(event) => patchWatchTarget(target.id, { enabled: event.target.checked })}
-                      />
-                      <code>{target.path}</code>
-                    </label>
-                    <button className="btn danger" onClick={() => removeWatchTarget(target.id)}>
-                      {t('settings.remove')}
-                    </button>
+              {/* Numeric settings */}
+              <div className="settings-numbers">
+                <label className="field-label">
+                  {t('settings.periodicIntervalMin')}
+                  <div className="field-with-unit">
+                    <input
+                      type="number"
+                      min={5}
+                      max={1440}
+                      value={settings.periodicMinutes}
+                      onChange={(event) =>
+                        queueSettingsUpdate({ periodicMinutes: Number.parseInt(event.target.value || '60', 10) })
+                      }
+                      onBlur={() => void flushPendingSettings()}
+                    />
+                    <span className="field-unit">min</span>
                   </div>
-                  <div className="target-fields">
-                    <label>
-                      {t('settings.targetThresholdMb')}
-                      <input
-                        type="number"
-                        min={0}
-                        value={target.targetThresholdBytes ? bytesToMbInput(target.targetThresholdBytes) : 0}
-                        onChange={(event) => {
-                          const numeric = Number.parseInt(event.target.value || '0', 10);
-                          patchWatchTarget(
-                            target.id,
-                            {
-                              targetThresholdBytes: numeric > 0 ? mbInputToBytes(numeric) : undefined,
-                            },
-                            'debounced'
-                          );
-                        }}
-                        onBlur={() => void flushPendingSettings()}
-                      />
-                    </label>
+                </label>
 
-                    <label>
-                      {t('settings.onlyComma')}
-                      <input
-                        type="text"
-                        value={target.only?.join(',') ?? ''}
-                        onChange={(event) => {
-                          const only = event.target.value
-                            .split(',')
-                            .map((item) => item.trim())
-                            .filter(Boolean);
-                          patchWatchTarget(target.id, { only: only.length > 0 ? only : undefined }, 'debounced');
-                        }}
-                        onBlur={() => void flushPendingSettings()}
-                      />
-                    </label>
-
-                    <label>
-                      {t('settings.excludeComma')}
-                      <input
-                        type="text"
-                        value={target.exclude?.join(',') ?? ''}
-                        onChange={(event) => {
-                          const exclude = event.target.value
-                            .split(',')
-                            .map((item) => item.trim())
-                            .filter(Boolean);
-                          patchWatchTarget(
-                            target.id,
-                            {
-                              exclude: exclude.length > 0 ? exclude : undefined,
-                            },
-                            'debounced'
-                          );
-                        }}
-                        onBlur={() => void flushPendingSettings()}
-                      />
-                    </label>
+                <label className="field-label">
+                  {t('settings.globalThresholdMb')}
+                  <div className="field-with-unit">
+                    <input
+                      type="number"
+                      min={0}
+                      value={bytesToMbInput(settings.globalThresholdBytes)}
+                      onChange={(event) =>
+                        queueSettingsUpdate({
+                          globalThresholdBytes: mbInputToBytes(Number.parseInt(event.target.value || '0', 10)),
+                        })
+                      }
+                      onBlur={() => void flushPendingSettings()}
+                    />
+                    <span className="field-unit">MB</span>
                   </div>
-                </article>
-              ))}
-            </div>
-          </section>
-        )}
+                </label>
 
-        {activeTab === 'alerts' && (
-          <AlertsSection
-            alerts={pagedAlerts}
-            alertPage={alertPage}
-            alertPageCount={alertPageCount}
-            t={t}
-            onMarkAllRead={() => void markAllAlertsRead()}
-            onClearAlerts={() => void clearAlerts()}
-            onPreviousPage={() => setAlertPage((page) => page - 1)}
-            onNextPage={() => setAlertPage((page) => page + 1)}
-          />
-        )}
-      </main>
+                <label className="field-label">
+                  {t('settings.alertCooldownMin')}
+                  <div className="field-with-unit">
+                    <input
+                      type="number"
+                      min={0}
+                      value={settings.alertCooldownMinutes}
+                      onChange={(event) =>
+                        queueSettingsUpdate({ alertCooldownMinutes: Number.parseInt(event.target.value || '0', 10) })
+                      }
+                      onBlur={() => void flushPendingSettings()}
+                    />
+                    <span className="field-unit">min</span>
+                  </div>
+                </label>
+              </div>
 
-      {(message || errorMessage) && (
-        <footer className="status-bar">
-          {message && <p className="ok-text">{message}</p>}
-          {errorMessage && <p className="error-text">{errorMessage}</p>}
-        </footer>
-      )}
+              <div className="inline-note">{t('settings.trayPolicyNote')}</div>
 
+              {/* Watch Targets */}
+              <div className="panel-header">
+                <h2 className="panel-title">{t('settings.watchTargets')}</h2>
+                <button className="btn primary" disabled={busy} onClick={() => void addWatchTargets()}>
+                  {t('settings.addFolders')}
+                </button>
+              </div>
+
+              {settings.watchTargets.length === 0 ? (
+                <div className="empty-state">
+                  <IconEmpty />
+                  <p>감시 대상 폴더가 없습니다. 폴더를 추가하세요.</p>
+                </div>
+              ) : (
+                <div className="target-list">
+                  {settings.watchTargets.map((target) => (
+                    <article key={target.id} className="target-card">
+                      <div className="target-top">
+                        <label>
+                          <input
+                            type="checkbox"
+                            checked={target.enabled}
+                            onChange={(event) => patchWatchTarget(target.id, { enabled: event.target.checked })}
+                          />
+                          <code>{target.path}</code>
+                        </label>
+                        <button className="btn danger" onClick={() => removeWatchTarget(target.id)}>
+                          {t('settings.remove')}
+                        </button>
+                      </div>
+                      <div className="target-fields">
+                        <label className="field-label">
+                          {t('settings.targetThresholdMb')}
+                          <div className="field-with-unit">
+                            <input
+                              type="number"
+                              min={0}
+                              value={target.targetThresholdBytes ? bytesToMbInput(target.targetThresholdBytes) : 0}
+                              onChange={(event) => {
+                                const numeric = Number.parseInt(event.target.value || '0', 10);
+                                patchWatchTarget(
+                                  target.id,
+                                  { targetThresholdBytes: numeric > 0 ? mbInputToBytes(numeric) : undefined },
+                                  'debounced'
+                                );
+                              }}
+                              onBlur={() => void flushPendingSettings()}
+                            />
+                            <span className="field-unit">MB</span>
+                          </div>
+                        </label>
+
+                        <label className="field-label">
+                          {t('settings.onlyComma')}
+                          <input
+                            type="text"
+                            value={target.only?.join(',') ?? ''}
+                            onChange={(event) => {
+                              const only = event.target.value.split(',').map((item) => item.trim()).filter(Boolean);
+                              patchWatchTarget(target.id, { only: only.length > 0 ? only : undefined }, 'debounced');
+                            }}
+                            onBlur={() => void flushPendingSettings()}
+                          />
+                        </label>
+
+                        <label className="field-label">
+                          {t('settings.excludeComma')}
+                          <input
+                            type="text"
+                            value={target.exclude?.join(',') ?? ''}
+                            onChange={(event) => {
+                              const exclude = event.target.value.split(',').map((item) => item.trim()).filter(Boolean);
+                              patchWatchTarget(
+                                target.id,
+                                { exclude: exclude.length > 0 ? exclude : undefined },
+                                'debounced'
+                              );
+                            }}
+                            onBlur={() => void flushPendingSettings()}
+                          />
+                        </label>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* ── Alerts Tab ───────────────────────────────────── */}
+          {activeTab === 'alerts' && (
+            <AlertsSection
+              alerts={pagedAlerts}
+              alertPage={alertPage}
+              alertPageCount={alertPageCount}
+              t={t}
+              onMarkAllRead={() => void markAllAlertsRead()}
+              onClearAlerts={() => void clearAlerts()}
+              onPreviousPage={() => setAlertPage((page) => page - 1)}
+              onNextPage={() => setAlertPage((page) => page + 1)}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* ── Modals ────────────────────────────────────────────── */}
       {showStartupChoiceModal && (
         <StartupChoiceModal
           busy={busy}
@@ -1113,11 +1221,7 @@ export default function App() {
           onTogglePath={(dirPath, checked) => {
             setSelectedDeletePaths((current) => {
               const next = new Set(current);
-              if (checked) {
-                next.add(dirPath);
-              } else {
-                next.delete(dirPath);
-              }
+              if (checked) { next.add(dirPath); } else { next.delete(dirPath); }
               return next;
             });
           }}
