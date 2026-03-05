@@ -361,6 +361,9 @@ function throwCleanupError(error: unknown): never {
     if (error.code === 'expired') {
       throw new Error(tMain('error.cleanupApprovalExpired'));
     }
+    if (error.code === 'emptySelection') {
+      throw new Error(tMain('error.cleanupSelectionEmpty'));
+    }
     if (error.code === 'rootPathNotAllowed') {
       throw new Error(tMain('error.cleanupRootPathNotAllowed', { path: error.targetPath ?? '' }));
     }
@@ -446,7 +449,6 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle('scan.runManual', async (_event, paths?: string[]) => {
     const outcome = await watchEngine.runManual(paths);
-    await sendOsNotifications(outcome);
     return outcome;
   });
 
@@ -457,7 +459,6 @@ function registerIpcHandlers(): void {
     }
 
     const outcome = await watchEngine.runScanSet(scanSet);
-    await sendOsNotifications(outcome);
     return outcome;
   });
 
@@ -645,6 +646,13 @@ async function bootstrap(): Promise<void> {
       onStatusChanged: (status) => {
         updateTrayMenu();
         sendToRenderer('watch.status.changed', status);
+      },
+      onWatcherError: (event) => {
+        appendDebugLog('watch.watcher-error', {
+          targetId: event.targetId,
+          targetPath: event.targetPath,
+          error: serializeUnknown(event.error),
+        });
       },
     });
 

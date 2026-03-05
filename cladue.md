@@ -102,6 +102,24 @@ The filename intentionally follows project request: `cladue.md`.
 - Runtime coordination:
   - when monitor is running, cleanup performs `watch.stop -> delete -> one rescan -> watch.start`
 
+## Reliability Hardening Snapshot (2026-03-05)
+
+- Scan notification dispatch is centralized:
+  - OS notifications are emitted from scan-completed callback path only.
+  - direct notification send in manual/set IPC handlers was removed.
+- Watch engine now handles watcher errors fail-soft:
+  - watcher `error` is trapped
+  - failed watcher is removed/closed without stopping monitor runtime
+  - watcher error context is logged in startup diagnostics.
+- Settings safety updates:
+  - strict boolean normalization for toggle-like fields
+  - watch target dedupe by canonical path during normalization
+  - corrupted settings file backup before default recovery (`settings.corrupt.<timestamp>.json`)
+- Cleanup contract update:
+  - empty selection confirm is rejected explicitly (`emptySelection` -> localized error).
+- Renderer i18n consistency:
+  - previously hard-coded empty/section labels now use locale dictionaries.
+
 ## Startup / Tray Rules
 
 - `AppSettings.startupChoiceCompleted` controls first-run modal visibility.

@@ -109,6 +109,22 @@ dep-clean --exclude vendor,Pods
 - Cleanup and watcher runs are coordinated to reduce I/O contention:
   - when monitor is running, cleanup uses `stop -> delete -> one rescan -> start`
 
+## Reliability Hardening Update (2026-03-05)
+
+- Scan notification flow is now single-sourced:
+  - manual/scan-set runs emit OS notifications only via `WatchEngine` scan-completed callback
+  - duplicate notifications from direct IPC handlers were removed
+- Watcher failures are now fail-soft:
+  - watcher `error` events are handled explicitly
+  - failed watcher is detached/closed while monitor runtime remains active
+  - watcher error details are logged to startup diagnostics
+- Settings normalization and persistence safety were tightened:
+  - boolean fields now enforce strict boolean coercion with defaults
+  - watch targets are deduped by canonical path during normalization
+  - corrupted `settings.json` is backed up (`settings.corrupt.<timestamp>.json`) before default recovery
+- Cleanup confirmation API now rejects empty selections explicitly.
+- Renderer locale consistency was improved by removing remaining hard-coded UI strings.
+
 ## Windows Packaging Bridge Stability
 
 - Preload is compiled as CommonJS (`dist/electron/preload.cjs`) for packaged builds.

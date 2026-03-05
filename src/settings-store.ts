@@ -7,6 +7,7 @@ import {
   MIN_PERIODIC_MINUTES,
   createDefaultSettings,
 } from './config.js';
+import { toCanonicalPathKey } from './cleanup-policy.js';
 import type { AppSettings, ScanSet, WatchTarget } from './types.js';
 
 function asStringArray(value: unknown): string[] {
@@ -37,6 +38,17 @@ function toNumber(value: unknown, fallback: number): number {
     return fallback;
   }
   return value;
+}
+
+function toBoolean(value: unknown, fallback: boolean): boolean {
+  if (typeof value === 'boolean') return value;
+  return fallback;
+}
+
+function isErrnoCode(error: unknown, code: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const errno = error as NodeJS.ErrnoException;
+  return errno.code === code;
 }
 
 function sanitizeWatchTarget(raw: unknown): WatchTarget | null {
@@ -89,6 +101,23 @@ function sanitizeScanSet(raw: unknown): ScanSet | null {
   };
 }
 
+function sanitizeWatchTargets(raw: unknown[]): WatchTarget[] {
+  const seenPathKeys = new Set<string>();
+  const output: WatchTarget[] = [];
+
+  for (const item of raw) {
+    const target = sanitizeWatchTarget(item);
+    if (!target) continue;
+
+    const pathKey = toCanonicalPathKey(target.path);
+    if (seenPathKeys.has(pathKey)) continue;
+    seenPathKeys.add(pathKey);
+    output.push(target);
+  }
+
+  return output;
+}
+
 export function normalizeSettings(raw: Partial<AppSettings> | null | undefined): AppSettings {
   const defaults = createDefaultSettings();
   const input = raw ?? {};
@@ -102,7 +131,7 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
   const alertCooldown = Math.max(0, Math.floor(toNumber(input.alertCooldownMinutes, defaults.alertCooldownMinutes)));
 
   const watchTargets = Array.isArray(input.watchTargets)
-    ? input.watchTargets.map((target) => sanitizeWatchTarget(target)).filter((target): target is WatchTarget => Boolean(target))
+    ? sanitizeWatchTargets(input.watchTargets)
     : defaults.watchTargets;
 
   const scanSets = Array.isArray(input.scanSets)
@@ -110,13 +139,13 @@ export function normalizeSettings(raw: Partial<AppSettings> | null | undefined):
     : defaults.scanSets;
 
   return {
-    autoStart: input.autoStart ?? defaults.autoStart,
-    startupChoiceCompleted: input.startupChoiceCompleted ?? defaults.startupChoiceCompleted,
+    autoStart: toBoolean(input.autoStart, defaults.autoStart),
+    startupChoiceCompleted: toBoolean(input.startupChoiceCompleted, defaults.startupChoiceCompleted),
     // Tray-resident behavior is fixed by product policy.
     runInTray: true,
-    periodicEnabled: input.periodicEnabled ?? defaults.periodicEnabled,
+    periodicEnabled: toBoolean(input.periodicEnabled, defaults.periodicEnabled),
     periodicMinutes: periodic,
-    realtimeEnabled: input.realtimeEnabled ?? defaults.realtimeEnabled,
+    realtimeEnabled: toBoolean(input.realtimeEnabled, defaults.realtimeEnabled),
     globalThresholdBytes: globalThreshold,
     alertCooldownMinutes: alertCooldown,
     watchTargets,
@@ -154,23 +183,39 @@ export class SettingsStore {
       return cloneSettings(this.cachedSettings);
     }
 
+    let raw: string;
     try {
-      const raw = await fs.promises.readFile(this.filePath, 'utf-8');
-      const parsed = JSON.parse(raw) as Partial<AppSettings>;
-      const normalized = normalizeSettings(parsed);
-      this.cachedSettings = normalized;
-
-      if (!isDeepStrictEqual(parsed, normalized)) {
-        await this.persist(normalized);
+      raw = await fs.promises.readFile(this.filePath, 'utf-8');
+    } catch (error) {
+      if (!isErrnoCode(error, 'ENOENT')) {
+        throw error;
       }
 
-      return cloneSettings(normalized);
-    } catch {
       const defaults = createDefaultSettings();
       await this.persist(defaults);
       this.cachedSettings = defaults;
       return cloneSettings(defaults);
     }
+
+    let parsed: Partial<AppSettings>;
+    try {
+      parsed = JSON.parse(raw) as Partial<AppSettings>;
+    } catch {
+      await this.backupCorruptSettings(raw);
+      const defaults = createDefaultSettings();
+      await this.persist(defaults);
+      this.cachedSettings = defaults;
+      return cloneSettings(defaults);
+    }
+
+    const normalized = normalizeSettings(parsed);
+    this.cachedSettings = normalized;
+
+    if (!isDeepStrictEqual(parsed, normalized)) {
+      await this.persist(normalized);
+    }
+
+    return cloneSettings(normalized);
   }
 
   async save(settings: AppSettings): Promise<AppSettings> {
@@ -200,5 +245,12 @@ export class SettingsStore {
   private async persist(settings: AppSettings): Promise<void> {
     await ensureParentDir(this.filePath);
     await fs.promises.writeFile(this.filePath, JSON.stringify(settings, null, 2), 'utf-8');
+  }
+
+  private async backupCorruptSettings(raw: string): Promise<void> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(path.dirname(this.filePath), `settings.corrupt.${timestamp}.json`);
+    await ensureParentDir(backupPath);
+    await fs.promises.writeFile(backupPath, raw, 'utf-8');
   }
 }

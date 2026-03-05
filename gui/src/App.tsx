@@ -241,7 +241,7 @@ const AlertsSection = memo(function AlertsSection({
       {alerts.length === 0 ? (
         <div className="empty-state">
           <IconEmpty />
-          <p>알림 이력이 없습니다</p>
+          <p>{t('alerts.empty')}</p>
         </div>
       ) : (
         <div className="alert-list">
@@ -901,7 +901,7 @@ export default function App() {
 
               {/* Monitor Section */}
               <div className="section-block">
-                <div className="section-block-title">Monitor</div>
+                <div className="section-block-title">{t('dashboard.monitorSectionTitle')}</div>
                 <div className="button-row">
                   <button className="btn primary" disabled={busy || isMonitoring} onClick={() => void startWatch()}>
                     {t('dashboard.startMonitor')}
@@ -987,7 +987,7 @@ export default function App() {
               {settings.scanSets.length === 0 ? (
                 <div className="empty-state">
                   <IconEmpty />
-                  <p>스캔 세트가 없습니다. 폴더를 선택해 세트를 추가하세요.</p>
+                  <p>{t('scanSets.empty')}</p>
                 </div>
               ) : (
                 <div className="set-list">
@@ -1128,7 +1128,7 @@ export default function App() {
               {settings.watchTargets.length === 0 ? (
                 <div className="empty-state">
                   <IconEmpty />
-                  <p>감시 대상 폴더가 없습니다. 폴더를 추가하세요.</p>
+                  <p>{t('settings.watchTargetsEmpty')}</p>
                 </div>
               ) : (
                 <div className="target-list">

@@ -12,10 +12,23 @@ import type {
 import { AlertManager } from './alert-manager.js';
 import { createTargetsFromWatchTargets, runScan, type ScanTargetInput } from './scan-runner.js';
 
+interface ManagedWatcher {
+  targetId: string;
+  targetPath: string;
+  watcher: FSWatcher;
+}
+
+interface WatcherErrorEvent {
+  targetId: string;
+  targetPath: string;
+  error: unknown;
+}
+
 interface WatchEngineCallbacks {
   onProgress?: (event: ScanProgressEvent) => void;
   onScanCompleted?: (outcome: ScanExecutionOutcome) => void;
   onStatusChanged?: (status: WatchStatus) => void;
+  onWatcherError?: (event: WatcherErrorEvent) => void;
 }
 
 function normalizeTokenList(value?: string[]): string {
@@ -58,7 +71,7 @@ function hasPeriodicSettingsChanges(previous: AppSettings, next: AppSettings): b
 export class WatchEngine {
   private running = false;
   private settings: AppSettings;
-  private watchers: FSWatcher[] = [];
+  private watchers: ManagedWatcher[] = [];
   private periodicTimer?: NodeJS.Timeout;
   private realtimeTimer?: NodeJS.Timeout;
   private pendingRealtimeTargetIds = new Set<string>();
@@ -139,8 +152,7 @@ export class WatchEngine {
     this.pendingRealtimeTargetIds.clear();
     this.realtimeScanEnqueued = false;
 
-    await Promise.all(this.watchers.map((watcher) => watcher.close()));
-    this.watchers = [];
+    await this.closeAllWatchers();
 
     this.nextRunAt = undefined;
     this.emitStatus();
@@ -180,8 +192,7 @@ export class WatchEngine {
   }
 
   private async rebuildWatchers(): Promise<void> {
-    await Promise.all(this.watchers.map((watcher) => watcher.close()));
-    this.watchers = [];
+    await this.closeAllWatchers();
 
     if (!this.running || !this.settings.realtimeEnabled) {
       this.emitStatus();
@@ -205,17 +216,57 @@ export class WatchEngine {
       const listener = () => {
         void this.runRealtimeForTarget(target.id);
       };
+      const managedWatcher: ManagedWatcher = {
+        targetId: target.id,
+        targetPath: target.path,
+        watcher,
+      };
 
       watcher.on('add', listener);
       watcher.on('addDir', listener);
       watcher.on('unlink', listener);
       watcher.on('unlinkDir', listener);
       watcher.on('change', listener);
+      watcher.on('error', (error) => {
+        this.handleWatcherError(managedWatcher, error);
+      });
 
-      this.watchers.push(watcher);
+      this.watchers.push(managedWatcher);
     }
 
     this.emitStatus();
+  }
+
+  private async closeAllWatchers(): Promise<void> {
+    if (this.watchers.length === 0) return;
+
+    const closingWatchers = this.watchers;
+    this.watchers = [];
+    await Promise.all(closingWatchers.map((entry) => this.closeWatcher(entry)));
+  }
+
+  private async closeWatcher(entry: ManagedWatcher): Promise<void> {
+    try {
+      await entry.watcher.close();
+    } catch {
+      // Keep watcher shutdown resilient during rebuild/stop flows.
+    }
+  }
+
+  private handleWatcherError(entry: ManagedWatcher, error: unknown): void {
+    const index = this.watchers.indexOf(entry);
+    if (index < 0) return;
+
+    this.watchers.splice(index, 1);
+    this.callbacks.onWatcherError?.({
+      targetId: entry.targetId,
+      targetPath: entry.targetPath,
+      error,
+    });
+
+    void this.closeWatcher(entry).finally(() => {
+      this.emitStatus();
+    });
   }
 
   private flushRealtimeQueue(): void {

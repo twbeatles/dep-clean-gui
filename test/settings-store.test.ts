@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, describe, it } from 'node:test';
@@ -28,6 +28,35 @@ describe('normalizeSettings', () => {
   it('forces runInTray to true even when input false', () => {
     const normalized = normalizeSettings({ runInTray: false });
     assert.equal(normalized.runInTray, true);
+  });
+
+  it('falls back to defaults for non-boolean toggle values', () => {
+    const normalized = normalizeSettings({
+      autoStart: 'false' as unknown as boolean,
+      startupChoiceCompleted: 'true' as unknown as boolean,
+      periodicEnabled: 0 as unknown as boolean,
+      realtimeEnabled: 1 as unknown as boolean,
+    });
+
+    assert.equal(normalized.autoStart, false);
+    assert.equal(normalized.startupChoiceCompleted, false);
+    assert.equal(normalized.periodicEnabled, true);
+    assert.equal(normalized.realtimeEnabled, true);
+  });
+
+  it('dedupes watch targets by canonical path', () => {
+    const firstPath = path.resolve('repo-a', 'node_modules');
+    const duplicatePath = path.join(firstPath, '..', 'node_modules');
+    const normalized = normalizeSettings({
+      watchTargets: [
+        { id: 'a', path: firstPath, enabled: true },
+        { id: 'b', path: duplicatePath, enabled: true },
+      ],
+    });
+
+    assert.equal(normalized.watchTargets.length, 1);
+    assert.equal(normalized.watchTargets[0].id, 'a');
+    assert.equal(path.resolve(normalized.watchTargets[0].path), path.resolve(firstPath));
   });
 });
 
@@ -103,5 +132,28 @@ describe('SettingsStore', () => {
     await store.update({ alertCooldownMinutes: 15 });
     const thirdMtime = statSync(filePath).mtimeMs;
     assert.equal(thirdMtime, secondMtime);
+  });
+
+  it('backs up corrupted settings file and recovers defaults', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-settings-corrupt-'));
+    tempRoots.push(root);
+
+    const filePath = path.join(root, 'settings.json');
+    const corruptedRaw = '{"autoStart": true';
+    writeFileSync(filePath, corruptedRaw, 'utf-8');
+
+    const store = new SettingsStore(root);
+    const loaded = await store.load();
+
+    assert.equal(loaded.autoStart, false);
+    assert.equal(loaded.runInTray, true);
+
+    const backupFiles = readdirSync(root).filter((name) => name.startsWith('settings.corrupt.'));
+    assert.equal(backupFiles.length, 1);
+    const backupRaw = readFileSync(path.join(root, backupFiles[0]), 'utf-8');
+    assert.equal(backupRaw, corruptedRaw);
+
+    const rewritten = JSON.parse(readFileSync(filePath, 'utf-8')) as { runInTray?: boolean };
+    assert.equal(rewritten.runInTray, true);
   });
 });

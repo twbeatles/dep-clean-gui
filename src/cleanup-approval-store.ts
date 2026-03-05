@@ -27,6 +27,7 @@ export interface CleanupApprovalSelection {
 export type CleanupApprovalStoreErrorCode =
   | 'missing'
   | 'expired'
+  | 'emptySelection'
   | 'pathOutOfScope'
   | 'rootPathNotAllowed';
 
@@ -136,6 +137,10 @@ export class CleanupApprovalStore {
       .filter((directory) => selectedPathKeys.has(toCanonicalPathKey(directory.path)))
       .map(cloneDirectory);
 
+    if (selectedDirectories.length === 0) {
+      throw new CleanupApprovalStoreError('emptySelection');
+    }
+
     return {
       approvalId: approval.id,
       allowedRoots: [...approval.allowedRoots],
@@ -215,4 +220,3 @@ export class CleanupApprovalStore {
     }
   }
 }
-

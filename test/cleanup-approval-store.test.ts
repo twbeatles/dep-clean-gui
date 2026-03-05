@@ -100,5 +100,21 @@ describe('CleanupApprovalStore', () => {
     assert.equal(retryPreview?.directories[0]?.path, failPath);
     assert.equal(retryPreview?.totalSize, 8);
   });
-});
 
+  it('throws when no cleanup paths are selected', () => {
+    const root = path.resolve('approval-empty-selection-root');
+    const targetPath = path.join(root, 'node_modules');
+    const store = new CleanupApprovalStore();
+    const preview = store.createPreview({
+      allowedRoots: [root],
+      directories: [directoryAt(targetPath, 1)],
+    });
+
+    assert.throws(
+      () => store.confirmSelection(preview.approvalId, []),
+      (error: unknown) =>
+        error instanceof CleanupApprovalStoreError &&
+        error.code === 'emptySelection'
+    );
+  });
+});

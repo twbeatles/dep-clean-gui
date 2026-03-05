@@ -49,6 +49,7 @@ Problems addressed in this fork:
 - Global threshold and per-target threshold.
 - Alert cooldown.
 - `exceeded` and `resolved` lifecycle records.
+- Notification emission must be single-delivery per scan completion.
 
 ### FR-5 Approval Cleanup
 - Preview first, then confirm delete.
@@ -121,9 +122,11 @@ Cleanup model requirements:
 - Permission-denied directories are skipped in scan.
 - Missing cleanup approval token returns explicit error.
 - Expired cleanup approvals return explicit error.
+- Empty cleanup selection returns explicit error.
 - Cleanup path-out-of-scope and root-path requests are rejected.
 - Partial delete failures are returned per path.
 - OS feature gaps (notification/login item) use graceful fallback.
+- Watcher runtime errors are fail-soft handled and must not crash monitoring runtime.
 
 ## 10. Test Strategy / Acceptance
 ### Automated
@@ -134,6 +137,9 @@ Cleanup model requirements:
 - Cleanup policy guardrails (dedupe/root/out-of-scope/registered roots)
 - Cleanup approval lifecycle (TTL/cancel/retry preview)
 - Cleaner retry + missing-path semantics
+- Watcher `error` fail-soft behavior
+- Settings boolean normalization hardening + corrupted settings backup recovery
+- Empty cleanup selection error contract
 
 ### Acceptance
 - First launch startup choice appears once
@@ -244,3 +250,20 @@ Cleanup model requirements:
   - `test/cleanup-approval-store.test.ts`
   - `test/cleaner.test.ts`
   - watch stop/start recovery case in `test/watch-engine.test.ts`
+
+## 19. Reliability Hardening Update (2026-03-05)
+
+- Notification flow now guarantees single OS notification emission per scan completion:
+  - delivery path is centralized in scan-completed callback handling.
+- Watch engine now handles watcher errors fail-soft:
+  - failing watcher is removed/closed
+  - monitor runtime remains active
+  - watcher error details are logged for diagnostics.
+- Settings safety and migration hardening:
+  - strict boolean normalization fallback is applied to toggle fields
+  - watch targets are deduplicated by canonical path
+  - malformed settings JSON is backed up before default recovery.
+- Cleanup confirmation contract tightened:
+  - empty selected-path payload is rejected explicitly.
+- Renderer locale consistency:
+  - remaining hard-coded labels in empty states/monitor section were moved to i18n keys.

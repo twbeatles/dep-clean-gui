@@ -109,6 +109,22 @@ dep-clean --exclude vendor,Pods
 - 모니터링과 정리 작업 경합을 줄이기 위해 실행을 직렬화했습니다.
   - 모니터링 중 정리 시 `stop -> delete -> 1회 rescan -> start`
 
+## 신뢰성 안정화 업데이트 (2026-03-05)
+
+- 스캔 알림 발송 경로를 단일화했습니다.
+  - 수동/세트 스캔의 OS 알림은 `WatchEngine`의 스캔 완료 콜백에서만 발송됩니다.
+  - IPC 핸들러 직접 발송을 제거해 중복 알림을 방지했습니다.
+- watcher 오류는 fail-soft로 처리합니다.
+  - watcher `error` 이벤트를 명시적으로 처리합니다.
+  - 오류 watcher만 분리/종료하고 모니터링 런타임은 유지합니다.
+  - 오류 정보는 startup diagnostics 로그로 기록됩니다.
+- 설정 정규화/복구 안전성을 강화했습니다.
+  - boolean 필드는 엄격한 boolean 검증 후 기본값으로 정규화합니다.
+  - watch target은 canonical path 기준으로 중복 제거합니다.
+  - `settings.json` 손상 시 기본값 복구 전 `settings.corrupt.<timestamp>.json` 백업을 생성합니다.
+- cleanup 확정 API는 빈 선택 요청을 명시적으로 거부합니다.
+- 렌더러의 남아 있던 하드코딩 UI 문자열을 i18n 키로 정리했습니다.
+
 ## Windows 패키징 브리지 안정성
 
 - 패키징 실행 시 preload는 CommonJS(`dist/electron/preload.cjs`)로 빌드됩니다.

@@ -167,4 +167,55 @@ describe('WatchEngine', () => {
 
     await engine.stop();
   });
+
+  it('keeps monitoring active after watcher error and removes failed watcher', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-watch-error-soft-'));
+    tempRoots.push(root);
+
+    const watchPath = path.join(root, 'watch');
+    mkdirSync(watchPath, { recursive: true });
+
+    const settings = createDefaultSettings();
+    settings.periodicEnabled = false;
+    settings.realtimeEnabled = true;
+    settings.watchTargets = [
+      {
+        id: 'target-1',
+        path: watchPath,
+        enabled: true,
+      },
+    ];
+
+    const watcherErrors: Array<{ targetId: string; targetPath: string; error: unknown }> = [];
+    const engine = new WatchEngine(settings, new AlertManager(root), {
+      onWatcherError: (event) => {
+        watcherErrors.push(event);
+      },
+    });
+
+    await engine.start();
+    const started = engine.getStatus();
+    assert.equal(started.running, true);
+    assert.equal(started.watcherCount > 0, true);
+
+    const engineInternal = engine as unknown as {
+      watchers: Array<{ watcher: { emit: (event: string, error: unknown) => boolean } }>;
+    };
+    const failedWatcher = engineInternal.watchers[0];
+    assert.ok(failedWatcher);
+
+    const simulatedError = new Error('simulated watcher failure');
+    failedWatcher.watcher.emit('error', simulatedError);
+    await delay(60);
+
+    const afterError = engine.getStatus();
+    assert.equal(afterError.running, true);
+    assert.equal(afterError.watcherCount, 0);
+    assert.equal(watcherErrors.length, 1);
+    assert.equal(watcherErrors[0].targetId, 'target-1');
+    assert.equal(watcherErrors[0].targetPath, watchPath);
+    assert.equal(watcherErrors[0].error, simulatedError);
+
+    await engine.stop();
+  });
 });

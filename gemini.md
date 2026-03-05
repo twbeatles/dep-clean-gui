@@ -106,6 +106,24 @@ This file mirrors `cladue.md` but is formatted for another AI workflow.
 - Monitor coordination:
   - cleanup now runs as `watch stop -> delete -> single manual rescan -> watch start` when monitor is active
 
+## Reliability Hardening Snapshot (2026-03-05)
+
+- Notification flow:
+  - OS notifications are now emitted from scan-completed callback path only.
+  - duplicate sends from manual/set IPC handler path were removed.
+- Watch runtime resilience:
+  - watcher `error` events are fail-soft handled
+  - failed watcher is detached/closed while monitoring remains running
+  - watcher error details are written to startup diagnostics log.
+- Settings integrity:
+  - strict boolean normalization fallback for toggle fields
+  - canonical-path dedupe for watch targets
+  - corrupted `settings.json` backup (`settings.corrupt.<timestamp>.json`) before default regeneration.
+- Cleanup API hardening:
+  - empty confirm selection is rejected via explicit contract error.
+- Renderer i18n:
+  - residual hard-coded labels/messages were moved to translation dictionaries.
+
 ## Test Expectations
 
 - Unit tests should cover:
