@@ -106,10 +106,14 @@ export interface WatchStatus {
   lastRunAt?: string;
 }
 
+export type ScanProgressPhase = 'started' | 'completed';
+
 export interface ScanProgressEvent {
   runId: string;
   source: ScanSource;
-  current: number;
+  phase: ScanProgressPhase;
+  started: number;
+  completed: number;
   total: number;
   targetId: string;
   targetPath: string;

@@ -206,7 +206,6 @@ export class WatchEngine {
 
       const watcher = chokidar.watch(target.path, {
         ignoreInitial: true,
-        depth: 6,
         awaitWriteFinish: {
           stabilityThreshold: 800,
           pollInterval: 100,

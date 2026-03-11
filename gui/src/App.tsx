@@ -65,6 +65,10 @@ function buildSetName(paths: string[], t: RendererTranslator): string {
   });
 }
 
+function mergeUniquePaths(paths: string[]): string[] {
+  return [...new Set(paths.map((item) => item.trim()).filter(Boolean))];
+}
+
 function mergeSettingsPatch(
   current: Partial<AppSettings>,
   patch: Partial<AppSettings>
@@ -408,6 +412,8 @@ export default function App() {
   const [progress, setProgress] = useState<ScanProgressEvent | null>(null);
   const [selectedSetId, setSelectedSetId] = useState<string>('');
   const [newSetName, setNewSetName] = useState('');
+  const [scanSetDraftName, setScanSetDraftName] = useState('');
+  const [scanSetDraftPaths, setScanSetDraftPaths] = useState<string[]>([]);
   const [preview, setPreview] = useState<CleanupPreview | null>(null);
   const [selectedDeletePaths, setSelectedDeletePaths] = useState<Set<string>>(new Set<string>());
   const [showStartupChoiceModal, setShowStartupChoiceModal] = useState(false);
@@ -423,6 +429,10 @@ export default function App() {
   const selectedSet = useMemo(
     () => settings?.scanSets.find((scanSet) => scanSet.id === selectedSetId) ?? null,
     [settings?.scanSets, selectedSetId]
+  );
+  const hasEnabledWatchTargets = useMemo(
+    () => (settings?.watchTargets ?? []).some((target) => target.enabled),
+    [settings?.watchTargets]
   );
 
   const selectedPreviewSize = useMemo(() => {
@@ -512,9 +522,6 @@ export default function App() {
       setAlerts(nextAlerts);
       setLastScan(nextScan);
       setShowStartupChoiceModal(!nextSettings.startupChoiceCompleted);
-      if (nextSettings.scanSets.length > 0) {
-        setSelectedSetId(nextSettings.scanSets[0].id);
-      }
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     }
@@ -554,6 +561,29 @@ export default function App() {
   useEffect(() => {
     setAlertPage((current) => Math.min(current, alertPageCount));
   }, [alertPageCount]);
+
+  useEffect(() => {
+    if (!settings) return;
+    if (settings.scanSets.length === 0) {
+      if (selectedSetId) setSelectedSetId('');
+      return;
+    }
+
+    if (selectedSetId && !settings.scanSets.some((scanSet) => scanSet.id === selectedSetId)) {
+      setSelectedSetId('');
+    }
+  }, [selectedSetId, settings]);
+
+  useEffect(() => {
+    if (!selectedSet) {
+      setScanSetDraftName('');
+      setScanSetDraftPaths([]);
+      return;
+    }
+
+    setScanSetDraftName(selectedSet.name);
+    setScanSetDraftPaths([...selectedSet.paths]);
+  }, [selectedSet?.id, selectedSet?.updatedAt]);
 
   useEffect(() => { setPreviewPage(1); }, [preview?.approvalId]);
   useEffect(() => {
@@ -675,7 +705,7 @@ export default function App() {
     const scanSet: ScanSet = {
       id: crypto.randomUUID(),
       name: newSetName.trim() || buildSetName(picked, t),
-      paths: [...new Set(picked)],
+      paths: mergeUniquePaths(picked),
       createdAt: now,
       updatedAt: now,
     };
@@ -689,26 +719,89 @@ export default function App() {
     if (!settings) return;
     const nextSets = settings.scanSets.filter((scanSet) => scanSet.id !== setId);
     void updateSettings({ scanSets: nextSets });
-    if (selectedSetId === setId) setSelectedSetId(nextSets[0]?.id ?? '');
+    if (selectedSetId === setId) setSelectedSetId('');
   }
 
-  async function openCleanupPreview(paths?: string[]) {
+  async function addFoldersToSelectedScanSet() {
+    if (!selectedSet) return;
+    const picked = await window.depClean.folders.pickMany();
+    if (picked.length === 0) return;
+
+    const nextPaths = mergeUniquePaths([...scanSetDraftPaths, ...picked]);
+    if (nextPaths.length === scanSetDraftPaths.length) {
+      setMessage(t('message.noNewFoldersInScanSet'));
+      return;
+    }
+
+    setScanSetDraftPaths(nextPaths);
+    setErrorMessage('');
+  }
+
+  function removeFolderFromSelectedScanSet(targetPath: string) {
+    setScanSetDraftPaths((current) => current.filter((item) => item !== targetPath));
+  }
+
+  async function saveSelectedScanSetChanges() {
+    if (!settings || !selectedSet) return;
+    if (scanSetDraftPaths.length === 0) {
+      setErrorMessage(t('error.scanSetRequiresFolder'));
+      return;
+    }
+
+    const nextName = scanSetDraftName.trim() || buildSetName(scanSetDraftPaths, t);
+    const nextUpdatedAt = new Date().toISOString();
+    const nextSets = settings.scanSets.map((scanSet) => {
+      if (scanSet.id !== selectedSet.id) return scanSet;
+      return {
+        ...scanSet,
+        name: nextName,
+        paths: mergeUniquePaths(scanSetDraftPaths),
+        updatedAt: nextUpdatedAt,
+      };
+    });
+
+    await updateSettingsNow(
+      { scanSets: nextSets },
+      t('message.scanSetUpdated', { name: nextName })
+    );
+  }
+
+  async function openCleanupPreview(
+    paths: string[] | undefined,
+    successMessage = t('message.cleanupPreviewGenerated')
+  ) {
     try {
       await flushPendingSettings();
       setBusy(true);
       if (preview) {
         await window.depClean.cleanup.cancel(preview.approvalId);
       }
-      const nextPreview = await window.depClean.cleanup.preview(paths ?? selectedSet?.paths);
+      const nextPreview = await window.depClean.cleanup.preview(paths);
       setPreview(nextPreview);
       setSelectedDeletePaths(new Set(nextPreview.directories.map((dir) => dir.path)));
-      setMessage(t('message.cleanupPreviewGenerated'));
+      setMessage(successMessage);
       setErrorMessage('');
     } catch (error) {
       setErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusy(false);
     }
+  }
+
+  async function openWatchTargetCleanupPreview() {
+    await openCleanupPreview(undefined, t('message.cleanupPreviewGeneratedWatchTargets'));
+  }
+
+  async function openScanSetCleanupPreview(setId?: string) {
+    const targetSet = setId
+      ? settings?.scanSets.find((scanSet) => scanSet.id === setId) ?? null
+      : selectedSet;
+    if (!targetSet) return;
+
+    await openCleanupPreview(
+      targetSet.paths,
+      t('message.cleanupPreviewGeneratedScanSet', { name: targetSet.name })
+    );
   }
 
   async function cancelCleanupPreview() {
@@ -797,7 +890,7 @@ export default function App() {
 
   /* ─── Progress percentage ─────────────────────────────────── */
   const progressPct = progress && progress.total > 0
-    ? Math.round((progress.current / progress.total) * 100)
+    ? Math.round((progress.completed / progress.total) * 100)
     : 0;
 
   return (
@@ -890,11 +983,47 @@ export default function App() {
                   <button className="btn primary" disabled={busy} onClick={() => void runManualScan()}>
                     {t('dashboard.manualScan')}
                   </button>
+                  <button
+                    className="btn"
+                    disabled={busy || !hasEnabledWatchTargets}
+                    onClick={() => void openWatchTargetCleanupPreview()}
+                  >
+                    {t('dashboard.previewWatchTargetsCleanup')}
+                  </button>
+                </div>
+              </div>
+
+              <div className="section-block">
+                <div className="section-block-title">{t('dashboard.scanSetSectionTitle')}</div>
+                <label className="field-label">
+                  {t('dashboard.selectScanSet')}
+                  <select value={selectedSetId} onChange={(event) => setSelectedSetId(event.target.value)}>
+                    <option value="">{t('dashboard.noScanSetSelected')}</option>
+                    {settings.scanSets.map((scanSet) => (
+                      <option key={scanSet.id} value={scanSet.id}>
+                        {scanSet.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedSet ? (
+                  <div className="selection-summary">
+                    <strong>{selectedSet.name}</strong>
+                    <span>{t('dashboard.scanSetSummary', { name: selectedSet.name, count: selectedSet.paths.length })}</span>
+                  </div>
+                ) : (
+                  <div className="inline-note">{t('dashboard.noScanSetSelected')}</div>
+                )}
+                <div className="button-row">
                   <button className="btn" disabled={busy || !selectedSet} onClick={() => void runSelectedSet()}>
                     {t('dashboard.runScanSet')}
                   </button>
-                  <button className="btn" disabled={busy} onClick={() => void openCleanupPreview()}>
-                    {t('dashboard.buildCleanupApproval')}
+                  <button
+                    className="btn"
+                    disabled={busy || !selectedSet}
+                    onClick={() => void openScanSetCleanupPreview()}
+                  >
+                    {t('dashboard.previewSelectedSetCleanup')}
                   </button>
                 </div>
               </div>
@@ -916,11 +1045,17 @@ export default function App() {
               {progress && (
                 <div className="inline-note">
                   <div style={{ marginBottom: 6 }}>
-                    {t('dashboard.scanProgress', {
-                      current: progress.current,
-                      total: progress.total,
-                      path: progress.targetPath,
-                    })}
+                    {progress.phase === 'completed'
+                      ? t('dashboard.scanProgressCompleted', {
+                          completed: progress.completed,
+                          total: progress.total,
+                          path: progress.targetPath,
+                        })
+                      : t('dashboard.scanProgressStarted', {
+                          completed: progress.completed,
+                          total: progress.total,
+                          path: progress.targetPath,
+                        })}
                   </div>
                   <div className="progress-bar-wrap">
                     <div className="progress-bar-fill" style={{ width: `${progressPct}%` }} />
@@ -1020,7 +1155,7 @@ export default function App() {
                         <button
                           className="btn"
                           disabled={busy}
-                          onClick={() => { setSelectedSetId(scanSet.id); void openCleanupPreview(scanSet.paths); }}
+                          onClick={() => { setSelectedSetId(scanSet.id); void openScanSetCleanupPreview(scanSet.id); }}
                         >
                           {t('scanSets.buildCleanup')}
                         </button>
@@ -1030,6 +1165,65 @@ export default function App() {
                       </div>
                     </article>
                   ))}
+                </div>
+              )}
+
+              <div className="panel-divider" />
+
+              {selectedSet ? (
+                <div className="set-editor">
+                  <div className="panel-header">
+                    <h3 className="panel-title">{t('scanSets.editorTitle')}</h3>
+                    <span className="tag">{t('scanSets.folderCount', { count: scanSetDraftPaths.length })}</span>
+                  </div>
+
+                  <label className="field-label">
+                    {t('scanSets.editorName')}
+                    <input
+                      type="text"
+                      value={scanSetDraftName}
+                      onChange={(event) => setScanSetDraftName(event.target.value)}
+                    />
+                  </label>
+
+                  <div className="set-editor-paths">
+                    <div className="panel-header">
+                      <h3 className="panel-title">{t('scanSets.editorFolders')}</h3>
+                      <button className="btn" disabled={busy} onClick={() => void addFoldersToSelectedScanSet()}>
+                        {t('scanSets.addFolders')}
+                      </button>
+                    </div>
+
+                    {scanSetDraftPaths.length === 0 ? (
+                      <div className="inline-note warning">{t('error.scanSetRequiresFolder')}</div>
+                    ) : (
+                      <ul className="set-path-list">
+                        {scanSetDraftPaths.map((targetPath) => (
+                          <li key={targetPath} className="set-path-row">
+                            <code>{targetPath}</code>
+                            <button
+                              className="btn danger"
+                              disabled={busy}
+                              onClick={() => removeFolderFromSelectedScanSet(targetPath)}
+                            >
+                              {t('settings.remove')}
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+
+                  <div className="button-row">
+                    <button className="btn primary" disabled={busy} onClick={() => void saveSelectedScanSetChanges()}>
+                      {t('scanSets.saveChanges')}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="empty-state">
+                  <IconEmpty />
+                  <p>{t('scanSets.noSelection')}</p>
                 </div>
               )}
             </section>

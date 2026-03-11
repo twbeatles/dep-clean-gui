@@ -16,6 +16,14 @@ interface EvaluatedThreshold {
   exceeded: boolean;
 }
 
+interface AlertKeySnapshot {
+  scope: 'global' | 'target';
+  currentBytes: number;
+  thresholdBytes: number;
+  targetId?: string;
+  targetPath?: string;
+}
+
 function getAlertsPath(baseDir?: string): string {
   const root = baseDir ?? path.join(os.homedir(), '.dep-clean-gui');
   return path.join(root, 'alerts.json');
@@ -36,9 +44,14 @@ export class AlertManager {
   private hydrated = false;
   private activeState = new Map<string, boolean>();
   private lastEmittedAt = new Map<string, number>();
+  private lastSnapshotByKey = new Map<string, AlertKeySnapshot>();
 
   constructor(baseDir?: string) {
     this.filePath = getAlertsPath(baseDir);
+  }
+
+  private keyForAlert(alert: Pick<ThresholdAlert, 'scope' | 'targetId'>): string {
+    return alert.scope === 'global' ? 'global' : `target:${alert.targetId ?? ''}`;
   }
 
   private async hydrate(): Promise<void> {
@@ -67,9 +80,16 @@ export class AlertManager {
     // Rebuild state from chronological history.
     const sorted = [...this.alerts].sort((a, b) => toTimestamp(a.timestamp) - toTimestamp(b.timestamp));
     for (const alert of sorted) {
-      const key = alert.scope === 'global' ? 'global' : `target:${alert.targetId ?? ''}`;
+      const key = this.keyForAlert(alert);
       this.activeState.set(key, alert.status === 'exceeded');
       this.lastEmittedAt.set(key, toTimestamp(alert.timestamp));
+      this.lastSnapshotByKey.set(key, {
+        scope: alert.scope,
+        currentBytes: alert.currentBytes,
+        thresholdBytes: alert.thresholdBytes,
+        targetId: alert.targetId,
+        targetPath: alert.targetPath,
+      });
     }
 
     if (this.trimHistory()) {
@@ -101,6 +121,7 @@ export class AlertManager {
     this.alerts = [];
     this.activeState.clear();
     this.lastEmittedAt.clear();
+    this.lastSnapshotByKey.clear();
     await this.persist();
   }
 
@@ -156,6 +177,17 @@ export class AlertManager {
     const now = Date.now();
     const cooldownMs = Math.max(0, settings.alertCooldownMinutes) * 60_000;
     const created: ThresholdAlert[] = [];
+    const evaluatedKeys = new Set(evaluated.map((threshold) => threshold.key));
+
+    for (const threshold of evaluated) {
+      this.lastSnapshotByKey.set(threshold.key, {
+        scope: threshold.scope,
+        currentBytes: threshold.currentBytes,
+        thresholdBytes: threshold.thresholdBytes,
+        targetId: threshold.targetId,
+        targetPath: threshold.targetPath,
+      });
+    }
 
     for (const threshold of evaluated) {
       const active = this.activeState.get(threshold.key) ?? false;
@@ -202,6 +234,32 @@ export class AlertManager {
         this.activeState.set(threshold.key, false);
         this.lastEmittedAt.set(threshold.key, now);
       }
+    }
+
+    for (const [key, active] of [...this.activeState.entries()]) {
+      if (evaluatedKeys.has(key)) continue;
+
+      const snapshot = this.lastSnapshotByKey.get(key);
+      if (active && snapshot) {
+        const alert: ThresholdAlert = {
+          id: randomUUID(),
+          scope: snapshot.scope,
+          targetId: snapshot.targetId,
+          targetPath: snapshot.targetPath,
+          currentBytes: 0,
+          thresholdBytes: snapshot.thresholdBytes,
+          status: 'resolved',
+          timestamp: new Date(now).toISOString(),
+          read: false,
+        };
+
+        created.push(alert);
+        this.alerts.push(alert);
+      }
+
+      this.activeState.delete(key);
+      this.lastEmittedAt.delete(key);
+      this.lastSnapshotByKey.delete(key);
     }
 
     const trimmed = this.trimHistory();

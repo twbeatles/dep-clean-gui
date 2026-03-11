@@ -28,6 +28,26 @@ function asStringArray(value: unknown): string[] {
   return out;
 }
 
+function asCanonicalPathArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<string>();
+  const out: string[] = [];
+
+  for (const item of value) {
+    if (typeof item !== 'string') continue;
+    const trimmed = item.trim();
+    if (!trimmed) continue;
+
+    const key = toCanonicalPathKey(trimmed);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(trimmed);
+  }
+
+  return out;
+}
+
 function asOptionalStringArray(value: unknown): string[] | undefined {
   const normalized = asStringArray(value);
   return normalized.length > 0 ? normalized : undefined;
@@ -88,7 +108,7 @@ function sanitizeScanSet(raw: unknown): ScanSet | null {
 
   if (!id || !name) return null;
 
-  const paths = asStringArray(set.paths);
+  const paths = asCanonicalPathArray(set.paths);
   if (paths.length === 0) return null;
 
   const now = new Date().toISOString();

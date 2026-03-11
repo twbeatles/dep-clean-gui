@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -215,6 +215,48 @@ describe('WatchEngine', () => {
     assert.equal(watcherErrors[0].targetId, 'target-1');
     assert.equal(watcherErrors[0].targetPath, watchPath);
     assert.equal(watcherErrors[0].error, simulatedError);
+
+    await engine.stop();
+  });
+
+  it('detects filesystem changes deeper than six levels', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-watch-deep-'));
+    tempRoots.push(root);
+
+    const watchPath = path.join(root, 'watch');
+    mkdirSync(watchPath, { recursive: true });
+
+    const settings = createDefaultSettings();
+    settings.periodicEnabled = false;
+    settings.realtimeEnabled = true;
+    settings.watchTargets = [
+      {
+        id: 'target-1',
+        path: watchPath,
+        enabled: true,
+      },
+    ];
+
+    const engine = new WatchEngine(settings, new AlertManager(root));
+    const engineInternal = engine as unknown as {
+      enqueueScan: (...args: unknown[]) => Promise<ScanExecutionOutcome>;
+    };
+
+    let enqueueCalls = 0;
+    engineInternal.enqueueScan = async () => {
+      enqueueCalls += 1;
+      return createFakeOutcome();
+    };
+
+    await engine.start();
+    await delay(300);
+
+    const deepDir = path.join(watchPath, 'a', 'b', 'c', 'd', 'e', 'f', 'g');
+    mkdirSync(deepDir, { recursive: true });
+    writeFileSync(path.join(deepDir, 'nested.txt'), 'hello');
+
+    await delay(3200);
+    assert.equal(enqueueCalls > 0, true);
 
     await engine.stop();
   });

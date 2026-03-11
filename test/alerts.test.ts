@@ -95,4 +95,31 @@ describe('AlertManager', () => {
     const limited = await manager.list({ limit: 100 });
     assert.equal(limited.length, 100);
   });
+
+  it('emits resolved alerts when active thresholds are removed from settings', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-alerts-threshold-remove-'));
+    tempRoots.push(root);
+
+    const manager = new AlertManager(root);
+    const settings = createDefaultSettings();
+    settings.globalThresholdBytes = 100;
+    settings.watchTargets = [
+      {
+        id: 'target-1',
+        path: '/tmp/project',
+        enabled: true,
+        targetThresholdBytes: 50,
+      },
+    ];
+
+    const exceeded = await manager.evaluate(createScanResult(120, 70), settings);
+    assert.equal(exceeded.length, 2);
+
+    settings.globalThresholdBytes = 0;
+    settings.watchTargets = [];
+
+    const resolved = await manager.evaluate(createScanResult(0, 0), settings);
+    assert.equal(resolved.length, 2);
+    assert.equal(resolved.every((item) => item.status === 'resolved'), true);
+  });
 });

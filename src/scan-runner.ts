@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { scanDirectories } from './scanner.js';
+import { toCanonicalPathKey } from './cleanup-policy.js';
 import type {
   AppScanResult,
   ScanProgressEvent,
@@ -46,13 +47,25 @@ async function mapLimit<T, R>(
   return out;
 }
 
+function normalizeTokenList(value?: string[]): string {
+  return (value ?? [])
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .sort()
+    .join(',');
+}
+
 function normalizeTargets(targets: ScanTargetInput[]): ScanTargetInput[] {
   const seen = new Set<string>();
   const output: ScanTargetInput[] = [];
 
   for (const target of targets) {
     if (!target.path.trim()) continue;
-    const key = `${target.id}:${target.path}`;
+    const key = [
+      toCanonicalPathKey(target.path),
+      normalizeTokenList(target.only),
+      normalizeTokenList(target.exclude),
+    ].join('|');
     if (seen.has(key)) continue;
     seen.add(key);
     output.push(target);
@@ -76,17 +89,20 @@ export async function runScan(options: RunScanOptions): Promise<AppScanResult> {
   const targets = normalizeTargets(options.targets);
   const startedAt = new Date().toISOString();
   const runId = randomUUID();
-  let progressCount = 0;
+  let startedCount = 0;
+  let completedCount = 0;
 
   const summaries: TargetScanSummary[] = await mapLimit(
     targets,
     TARGET_SCAN_CONCURRENCY,
     async (target): Promise<TargetScanSummary> => {
-      progressCount += 1;
+      startedCount += 1;
       options.onProgress?.({
         runId,
         source: options.source,
-        current: progressCount,
+        phase: 'started',
+        started: startedCount,
+        completed: completedCount,
         total: targets.length,
         targetId: target.id,
         targetPath: target.path,
@@ -97,6 +113,18 @@ export async function runScan(options: RunScanOptions): Promise<AppScanResult> {
         targetDir: target.path,
         only: target.only,
         exclude: target.exclude,
+      });
+
+      completedCount += 1;
+      options.onProgress?.({
+        runId,
+        source: options.source,
+        phase: 'completed',
+        started: startedCount,
+        completed: completedCount,
+        total: targets.length,
+        targetId: target.id,
+        targetPath: target.path,
       });
 
       return {

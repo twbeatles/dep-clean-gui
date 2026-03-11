@@ -58,6 +58,29 @@ describe('normalizeSettings', () => {
     assert.equal(normalized.watchTargets[0].id, 'a');
     assert.equal(path.resolve(normalized.watchTargets[0].path), path.resolve(firstPath));
   });
+
+  it('dedupes scan set paths by canonical path', () => {
+    const firstPath = path.resolve('repo-a');
+    const duplicatePath = process.platform === 'win32'
+      ? firstPath.toUpperCase()
+      : path.join(firstPath, '..', path.basename(firstPath));
+
+    const normalized = normalizeSettings({
+      scanSets: [
+        {
+          id: 'set-1',
+          name: 'Set',
+          paths: [firstPath, duplicatePath],
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+    });
+
+    assert.equal(normalized.scanSets.length, 1);
+    assert.equal(normalized.scanSets[0].paths.length, 1);
+    assert.equal(path.resolve(normalized.scanSets[0].paths[0]), path.resolve(firstPath));
+  });
 });
 
 describe('SettingsStore', () => {
