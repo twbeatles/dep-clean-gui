@@ -125,6 +125,22 @@ dep-clean --exclude vendor,Pods
 - cleanup 확정 API는 빈 선택 요청을 명시적으로 거부합니다.
 - 렌더러의 남아 있던 하드코딩 UI 문자열을 i18n 키로 정리했습니다.
 
+## 알림 정확도 + watcher 복구 업데이트 (2026-04-16)
+
+- 임계치 평가는 전체 스캔과 부분 스캔을 구분하도록 보강되었습니다.
+  - 부분 스캔은 관련 없는 기존 활성 알림을 자동 `resolved` 처리하지 않습니다.
+  - scan set / 부분 스캔의 개별 타겟 알림은 일시적인 실행 id가 아니라 canonical path 기준으로 매칭합니다.
+  - 부분 스캔에서는 오해를 줄이기 위해 global threshold 평가를 생략합니다.
+- watcher 런타임은 `degraded but recovering` 상태를 노출합니다.
+  - watcher 실패 시 모니터 상태를 복구 중으로 표시합니다.
+  - 실패한 watcher 대상은 백그라운드에서 자동 재시도합니다.
+  - 렌더러는 복구 중 대상 개수와 경로를 표시합니다.
+- 알림 저장 안정성을 보강했습니다.
+  - `alerts.json` 저장은 temp file 교체 방식으로 처리합니다.
+  - 손상된 알림 이력은 `alerts.corrupt.<timestamp>.json`으로 백업한 뒤 복구합니다.
+- cleanup preview UX를 개선했습니다.
+  - 정리 후보가 없으면 빈 확인 모달 대신 안내 메시지를 표시합니다.
+
 ## Windows 패키징 브리지 안정성
 
 - 패키징 실행 시 preload는 CommonJS(`dist/electron/preload.cjs`)로 빌드됩니다.

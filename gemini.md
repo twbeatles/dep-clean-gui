@@ -124,6 +124,22 @@ This file mirrors `cladue.md` but is formatted for another AI workflow.
 - Renderer i18n:
   - residual hard-coded labels/messages were moved to translation dictionaries.
 
+## Alert Accuracy + Recovery Snapshot (2026-04-16)
+
+- Alert semantics are now aware of scan scope:
+  - partial scans do not auto-resolve unrelated active alerts
+  - scan-set / partial target alerts are matched by canonical path to existing watch targets
+  - global threshold evaluation is skipped for partial scans
+- Watch runtime now has a visible degraded recovery state:
+  - `WatchStatus` includes `failedWatcherCount`, `degraded`, and `failedWatchTargets`
+  - failed watcher targets are retried automatically in the background
+  - renderer surfaces recovering target count and paths
+- Alert persistence is more durable:
+  - `alerts.json` writes use temp-file replacement
+  - corrupt alert history is backed up as `alerts.corrupt.<timestamp>.json` before reset
+- Cleanup preview UX:
+  - empty cleanup previews show a friendly no-candidates message instead of an empty confirmation modal
+
 ## Test Expectations
 
 - Unit tests should cover:

@@ -12,10 +12,19 @@ import type {
 import { AlertManager } from './alert-manager.js';
 import { createTargetsFromWatchTargets, runScan, type ScanTargetInput } from './scan-runner.js';
 
+const WATCHER_RECOVERY_RETRY_MS = 15_000;
+
 interface ManagedWatcher {
   targetId: string;
   targetPath: string;
   watcher: FSWatcher;
+}
+
+interface FailedWatcherTarget {
+  targetId: string;
+  targetPath: string;
+  lastErrorAt: string;
+  errorMessage: string;
 }
 
 interface WatcherErrorEvent {
@@ -29,6 +38,10 @@ interface WatchEngineCallbacks {
   onScanCompleted?: (outcome: ScanExecutionOutcome) => void;
   onStatusChanged?: (status: WatchStatus) => void;
   onWatcherError?: (event: WatcherErrorEvent) => void;
+}
+
+interface WatchEngineOptions {
+  watcherRecoveryDelayMs?: number;
 }
 
 function normalizeTokenList(value?: string[]): string {
@@ -74,19 +87,24 @@ export class WatchEngine {
   private watchers: ManagedWatcher[] = [];
   private periodicTimer?: NodeJS.Timeout;
   private realtimeTimer?: NodeJS.Timeout;
+  private watcherRecoveryTimer?: NodeJS.Timeout;
   private pendingRealtimeTargetIds = new Set<string>();
   private realtimeScanEnqueued = false;
   private scanQueue: Promise<ScanExecutionOutcome | null> = Promise.resolve(null);
   private nextRunAt?: string;
   private lastRunAt?: string;
   private lastResult?: AppScanResult;
+  private readonly watcherRecoveryDelayMs: number;
+  private readonly failedWatchTargets = new Map<string, FailedWatcherTarget>();
 
   constructor(
     initialSettings: AppSettings,
     private readonly alertManager: AlertManager,
-    private readonly callbacks: WatchEngineCallbacks = {}
+    private readonly callbacks: WatchEngineCallbacks = {},
+    options: WatchEngineOptions = {}
   ) {
     this.settings = initialSettings;
+    this.watcherRecoveryDelayMs = Math.max(25, options.watcherRecoveryDelayMs ?? WATCHER_RECOVERY_RETRY_MS);
   }
 
   getStatus(): WatchStatus {
@@ -95,6 +113,9 @@ export class WatchEngine {
       periodicEnabled: this.settings.periodicEnabled,
       realtimeEnabled: this.settings.realtimeEnabled,
       watcherCount: this.watchers.length,
+      failedWatcherCount: this.failedWatchTargets.size,
+      degraded: this.failedWatchTargets.size > 0,
+      failedWatchTargets: [...this.failedWatchTargets.values()].map((entry) => entry.targetPath),
       nextRunAt: this.nextRunAt,
       lastRunAt: this.lastRunAt,
     };
@@ -149,8 +170,10 @@ export class WatchEngine {
       this.realtimeTimer = undefined;
     }
 
+    this.clearWatcherRecoveryTimer();
     this.pendingRealtimeTargetIds.clear();
     this.realtimeScanEnqueued = false;
+    this.failedWatchTargets.clear();
 
     await this.closeAllWatchers();
 
@@ -164,7 +187,9 @@ export class WatchEngine {
       ? paths.map((targetPath, index) => ({ id: `manual-${index}`, path: targetPath }))
       : createTargetsFromWatchTargets(this.settings.watchTargets);
 
-    return this.enqueueScan('manual', targets);
+    return this.enqueueScan('manual', targets, undefined, {
+      includeGlobalThreshold: !paths || paths.length === 0,
+    });
   }
 
   async runScanSet(scanSet: ScanSet): Promise<ScanExecutionOutcome> {
@@ -173,7 +198,9 @@ export class WatchEngine {
       path: targetPath,
     }));
 
-    return this.enqueueScan('scan-set', targets, scanSet.id);
+    return this.enqueueScan('scan-set', targets, scanSet.id, {
+      includeGlobalThreshold: false,
+    });
   }
 
   async runRealtimeForTarget(targetId: string): Promise<void> {
@@ -195,42 +222,72 @@ export class WatchEngine {
     await this.closeAllWatchers();
 
     if (!this.running || !this.settings.realtimeEnabled) {
+      this.failedWatchTargets.clear();
+      this.clearWatcherRecoveryTimer();
       this.emitStatus();
       return;
     }
 
     const enabledTargets = this.settings.watchTargets.filter((target) => target.enabled);
+    const enabledTargetIds = new Set(enabledTargets.map((target) => target.id));
+
+    for (const targetId of [...this.failedWatchTargets.keys()]) {
+      if (!enabledTargetIds.has(targetId)) {
+        this.failedWatchTargets.delete(targetId);
+      }
+    }
 
     for (const target of enabledTargets) {
       if (!fs.existsSync(target.path)) continue;
 
-      const watcher = chokidar.watch(target.path, {
-        ignoreInitial: true,
-        awaitWriteFinish: {
-          stabilityThreshold: 800,
-          pollInterval: 100,
-        },
-      });
+      try {
+        const watcher = chokidar.watch(target.path, {
+          ignoreInitial: true,
+          awaitWriteFinish: {
+            stabilityThreshold: 800,
+            pollInterval: 100,
+          },
+        });
 
-      const listener = () => {
-        void this.runRealtimeForTarget(target.id);
-      };
-      const managedWatcher: ManagedWatcher = {
-        targetId: target.id,
-        targetPath: target.path,
-        watcher,
-      };
+        const listener = () => {
+          void this.runRealtimeForTarget(target.id);
+        };
+        const managedWatcher: ManagedWatcher = {
+          targetId: target.id,
+          targetPath: target.path,
+          watcher,
+        };
 
-      watcher.on('add', listener);
-      watcher.on('addDir', listener);
-      watcher.on('unlink', listener);
-      watcher.on('unlinkDir', listener);
-      watcher.on('change', listener);
-      watcher.on('error', (error) => {
-        this.handleWatcherError(managedWatcher, error);
-      });
+        watcher.on('add', listener);
+        watcher.on('addDir', listener);
+        watcher.on('unlink', listener);
+        watcher.on('unlinkDir', listener);
+        watcher.on('change', listener);
+        watcher.on('error', (error) => {
+          this.handleWatcherError(managedWatcher, error);
+        });
 
-      this.watchers.push(managedWatcher);
+        this.failedWatchTargets.delete(target.id);
+        this.watchers.push(managedWatcher);
+      } catch (error) {
+        this.failedWatchTargets.set(target.id, {
+          targetId: target.id,
+          targetPath: target.path,
+          lastErrorAt: new Date().toISOString(),
+          errorMessage: error instanceof Error ? error.message : String(error),
+        });
+        this.callbacks.onWatcherError?.({
+          targetId: target.id,
+          targetPath: target.path,
+          error,
+        });
+      }
+    }
+
+    if (this.failedWatchTargets.size > 0) {
+      this.scheduleWatcherRecoveryRetry();
+    } else {
+      this.clearWatcherRecoveryTimer();
     }
 
     this.emitStatus();
@@ -257,6 +314,12 @@ export class WatchEngine {
     if (index < 0) return;
 
     this.watchers.splice(index, 1);
+    this.failedWatchTargets.set(entry.targetId, {
+      targetId: entry.targetId,
+      targetPath: entry.targetPath,
+      lastErrorAt: new Date().toISOString(),
+      errorMessage: error instanceof Error ? error.message : String(error),
+    });
     this.callbacks.onWatcherError?.({
       targetId: entry.targetId,
       targetPath: entry.targetPath,
@@ -264,6 +327,7 @@ export class WatchEngine {
     });
 
     void this.closeWatcher(entry).finally(() => {
+      this.scheduleWatcherRecoveryRetry();
       this.emitStatus();
     });
   }
@@ -296,7 +360,9 @@ export class WatchEngine {
     }
 
     this.realtimeScanEnqueued = true;
-    void this.enqueueScan('watch-realtime', targets)
+    void this.enqueueScan('watch-realtime', targets, undefined, {
+      includeGlobalThreshold: false,
+    })
       .catch(() => null)
       .finally(() => {
         this.realtimeScanEnqueued = false;
@@ -326,7 +392,9 @@ export class WatchEngine {
     this.periodicTimer = setTimeout(() => {
       const targets = createTargetsFromWatchTargets(this.settings.watchTargets);
       if (targets.length > 0) {
-        void this.enqueueScan('watch-periodic', targets);
+        void this.enqueueScan('watch-periodic', targets, undefined, {
+          includeGlobalThreshold: true,
+        });
       }
       this.resetPeriodicTimer();
     }, intervalMs);
@@ -337,7 +405,8 @@ export class WatchEngine {
   private enqueueScan(
     source: AppScanResult['source'],
     targets: ScanTargetInput[],
-    setId?: string
+    setId?: string,
+    alertOptions?: { includeGlobalThreshold?: boolean }
   ): Promise<ScanExecutionOutcome> {
     this.scanQueue = this.scanQueue
       .catch(() => null)
@@ -354,7 +423,7 @@ export class WatchEngine {
         this.lastRunAt = new Date().toISOString();
         this.lastResult = scanResult;
 
-        const alerts = await this.alertManager.evaluate(scanResult, this.settings);
+        const alerts = await this.alertManager.evaluate(scanResult, this.settings, alertOptions);
         const outcome = { scanResult, alerts };
 
         this.callbacks.onScanCompleted?.(outcome);
@@ -373,6 +442,29 @@ export class WatchEngine {
 
   private emitStatus(): void {
     this.callbacks.onStatusChanged?.(this.getStatus());
+  }
+
+  private scheduleWatcherRecoveryRetry(): void {
+    if (!this.running || !this.settings.realtimeEnabled || this.failedWatchTargets.size === 0) {
+      this.clearWatcherRecoveryTimer();
+      return;
+    }
+
+    if (this.watcherRecoveryTimer) return;
+
+    this.watcherRecoveryTimer = setTimeout(() => {
+      this.watcherRecoveryTimer = undefined;
+      void this.rebuildWatchers().catch(() => {
+        this.scheduleWatcherRecoveryRetry();
+      });
+    }, this.watcherRecoveryDelayMs);
+    this.watcherRecoveryTimer.unref?.();
+  }
+
+  private clearWatcherRecoveryTimer(): void {
+    if (!this.watcherRecoveryTimer) return;
+    clearTimeout(this.watcherRecoveryTimer);
+    this.watcherRecoveryTimer = undefined;
   }
 }
 

@@ -120,6 +120,22 @@ The filename intentionally follows project request: `cladue.md`.
 - Renderer i18n consistency:
   - previously hard-coded empty/section labels now use locale dictionaries.
 
+## Alert Accuracy + Recovery Snapshot (2026-04-16)
+
+- Alert evaluation semantics are now scan-scope aware:
+  - partial scans no longer auto-resolve unrelated active alerts
+  - per-target threshold matching uses canonical path, so scan-set targets can still map back to watch targets
+  - global threshold evaluation is skipped for partial scans
+- Watch status contract expanded:
+  - `WatchStatus` now includes `failedWatcherCount`, `degraded`, and `failedWatchTargets`
+  - watcher failures move monitor into degraded/recovering state instead of staying silently "healthy"
+  - failed watcher targets are retried automatically in background
+- Alert history persistence hardened:
+  - `alerts.json` writes use temp-file replacement
+  - corrupt alert history is backed up as `alerts.corrupt.<timestamp>.json` before recovery
+- Cleanup preview renderer behavior:
+  - zero-result preview now shows a friendly message instead of opening an empty confirmation modal
+
 ## Startup / Tray Rules
 
 - `AppSettings.startupChoiceCompleted` controls first-run modal visibility.

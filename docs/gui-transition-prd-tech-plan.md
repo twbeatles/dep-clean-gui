@@ -50,6 +50,8 @@ Problems addressed in this fork:
 - Alert cooldown.
 - `exceeded` and `resolved` lifecycle records.
 - Notification emission must be single-delivery per scan completion.
+- Partial scans must not auto-resolve unrelated active alerts.
+- Scan-set / partial target threshold matching must remain stable even when transient run ids differ from watch target ids.
 
 ### FR-5 Approval Cleanup
 - Preview first, then confirm delete.
@@ -57,6 +59,7 @@ Problems addressed in this fork:
 - Approval is time-bounded (TTL) and can be explicitly canceled.
 - Cleanup preview/delete must stay within approved roots.
 - Partial failures must support retry without rebuilding the entire preview.
+- Zero-result cleanup preview should return explicit user feedback instead of an empty confirmation experience.
 
 ### FR-6 CLI Compatibility
 - Preserve CLI options and behavior.
@@ -105,6 +108,7 @@ Core flow:
 - `ThresholdAlert`
 - `CleanupPreview`
 - `CleanupConfirmResult`
+- `WatchStatus` with degraded recovery details (`failedWatcherCount`, `failedWatchTargets`)
 
 Cleanup model requirements:
 - `CleanupPreview` includes `expiresAt`.
@@ -127,18 +131,24 @@ Cleanup model requirements:
 - Partial delete failures are returned per path.
 - OS feature gaps (notification/login item) use graceful fallback.
 - Watcher runtime errors are fail-soft handled and must not crash monitoring runtime.
+- Watcher failures should move runtime into degraded state and attempt background recovery.
+- Corrupted alert history should be backed up before default recovery.
 
 ## 10. Test Strategy / Acceptance
 ### Automated
 - Scanner target filtering
 - Alert lifecycle and cooldown
+- Partial-scan alert accuracy (no false `resolved`)
+- Canonical-path threshold matching for scan-set targets
 - Settings normalization and migration
 - Launch mode decision (`--launch-tray`, login startup)
 - Cleanup policy guardrails (dedupe/root/out-of-scope/registered roots)
 - Cleanup approval lifecycle (TTL/cancel/retry preview)
 - Cleaner retry + missing-path semantics
 - Watcher `error` fail-soft behavior
+- Watcher degraded-state recovery retry
 - Settings boolean normalization hardening + corrupted settings backup recovery
+- Corrupted alert history backup recovery
 - Empty cleanup selection error contract
 
 ### Acceptance
@@ -267,3 +277,20 @@ Cleanup model requirements:
   - empty selected-path payload is rejected explicitly.
 - Renderer locale consistency:
   - remaining hard-coded labels in empty states/monitor section were moved to i18n keys.
+
+## 20. Alert Accuracy + Recovery Update (2026-04-16)
+
+- Threshold evaluation now distinguishes full scans from partial scans:
+  - partial scans do not auto-resolve unrelated active alerts
+  - global threshold evaluation is skipped for partial scans
+- Per-target threshold matching is canonical-path based:
+  - scan-set and partial runs can still map to configured watch targets even when runtime target ids differ
+- Watch runtime now exposes degraded recovery state:
+  - `WatchStatus` carries failed target count/path details
+  - failed watcher targets are retried automatically in background
+  - renderer surfaces the degraded/recovering state explicitly
+- Alert persistence is hardened:
+  - `alerts.json` writes use temp-file replacement
+  - corrupted alert history is backed up as `alerts.corrupt.<timestamp>.json` before reset
+- Cleanup preview UX:
+  - zero-candidate previews now produce explicit user feedback instead of an empty confirmation modal

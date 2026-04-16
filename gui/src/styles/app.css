@@ -292,6 +292,12 @@ textarea {
   background: var(--ok-dim);
 }
 
+.pill.warning {
+  border-color: rgba(245, 200, 66, 0.45);
+  color: #fde68a;
+  background: rgba(245, 200, 66, 0.12);
+}
+
 .pill.idle {
   border-color: rgba(240, 75, 107, 0.4);
   color: #fca5a5;
@@ -580,6 +586,13 @@ textarea {
   border-color: rgba(245, 200, 66, 0.4);
   background: rgba(245, 200, 66, 0.08);
   color: #fde68a;
+}
+
+.inline-note code {
+  font-size: 0.76rem;
+  color: #93c5fd;
+  font-family: 'JetBrains Mono', 'Consolas', monospace;
+  word-break: break-all;
 }
 
 .selection-summary {

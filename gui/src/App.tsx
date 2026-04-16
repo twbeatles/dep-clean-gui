@@ -46,6 +46,10 @@ function timestampText(iso: string): string {
   return new Date(iso).toLocaleString();
 }
 
+function toErrorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 function createTarget(targetPath: string): WatchTarget {
   return {
     id: crypto.randomUUID(),
@@ -479,7 +483,7 @@ export default function App() {
       if (options?.successMessage) setMessage(options.successMessage);
       setErrorMessage('');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       if (withBusy) setBusy(false);
     }
@@ -523,7 +527,7 @@ export default function App() {
       setLastScan(nextScan);
       setShowStartupChoiceModal(!nextSettings.startupChoiceCompleted);
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     }
   }
 
@@ -609,7 +613,7 @@ export default function App() {
       }));
       setErrorMessage('');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -631,7 +635,7 @@ export default function App() {
       setMessage(t('message.scanSetComplete', { name: targetSet.name }));
       setErrorMessage('');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -646,7 +650,7 @@ export default function App() {
       setMessage(t('message.monitorStarted'));
       setErrorMessage('');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -661,7 +665,7 @@ export default function App() {
       setMessage(t('message.monitorStopped'));
       setErrorMessage('');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -669,12 +673,20 @@ export default function App() {
 
   async function addWatchTargets() {
     if (!settings) return;
-    const picked = await window.depClean.folders.pickMany();
-    if (picked.length === 0) return;
-    const existing = new Set(settings.watchTargets.map((target) => target.path));
-    const additions = picked.filter((item) => !existing.has(item)).map((item) => createTarget(item));
-    if (additions.length === 0) { setMessage(t('message.noNewFolders')); return; }
-    await updateSettings({ watchTargets: [...settings.watchTargets, ...additions] });
+    try {
+      const picked = await window.depClean.folders.pickMany();
+      if (picked.length === 0) return;
+      const existing = new Set(settings.watchTargets.map((target) => target.path));
+      const additions = picked.filter((item) => !existing.has(item)).map((item) => createTarget(item));
+      if (additions.length === 0) {
+        setMessage(t('message.noNewFolders'));
+        setErrorMessage('');
+        return;
+      }
+      await updateSettings({ watchTargets: [...settings.watchTargets, ...additions] });
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
   }
 
   function patchWatchTarget(
@@ -699,20 +711,24 @@ export default function App() {
 
   async function createScanSet() {
     if (!settings) return;
-    const picked = await window.depClean.folders.pickMany();
-    if (picked.length === 0) return;
-    const now = new Date().toISOString();
-    const scanSet: ScanSet = {
-      id: crypto.randomUUID(),
-      name: newSetName.trim() || buildSetName(picked, t),
-      paths: mergeUniquePaths(picked),
-      createdAt: now,
-      updatedAt: now,
-    };
-    const nextSets = [...settings.scanSets, scanSet];
-    await updateSettings({ scanSets: nextSets });
-    setNewSetName('');
-    setSelectedSetId(scanSet.id);
+    try {
+      const picked = await window.depClean.folders.pickMany();
+      if (picked.length === 0) return;
+      const now = new Date().toISOString();
+      const scanSet: ScanSet = {
+        id: crypto.randomUUID(),
+        name: newSetName.trim() || buildSetName(picked, t),
+        paths: mergeUniquePaths(picked),
+        createdAt: now,
+        updatedAt: now,
+      };
+      const nextSets = [...settings.scanSets, scanSet];
+      await updateSettings({ scanSets: nextSets });
+      setNewSetName('');
+      setSelectedSetId(scanSet.id);
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
   }
 
   function deleteScanSet(setId: string) {
@@ -724,17 +740,22 @@ export default function App() {
 
   async function addFoldersToSelectedScanSet() {
     if (!selectedSet) return;
-    const picked = await window.depClean.folders.pickMany();
-    if (picked.length === 0) return;
+    try {
+      const picked = await window.depClean.folders.pickMany();
+      if (picked.length === 0) return;
 
-    const nextPaths = mergeUniquePaths([...scanSetDraftPaths, ...picked]);
-    if (nextPaths.length === scanSetDraftPaths.length) {
-      setMessage(t('message.noNewFoldersInScanSet'));
-      return;
+      const nextPaths = mergeUniquePaths([...scanSetDraftPaths, ...picked]);
+      if (nextPaths.length === scanSetDraftPaths.length) {
+        setMessage(t('message.noNewFoldersInScanSet'));
+        setErrorMessage('');
+        return;
+      }
+
+      setScanSetDraftPaths(nextPaths);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
     }
-
-    setScanSetDraftPaths(nextPaths);
-    setErrorMessage('');
   }
 
   function removeFolderFromSelectedScanSet(targetPath: string) {
@@ -777,12 +798,20 @@ export default function App() {
         await window.depClean.cleanup.cancel(preview.approvalId);
       }
       const nextPreview = await window.depClean.cleanup.preview(paths);
+      if (nextPreview.directories.length === 0) {
+        await window.depClean.cleanup.cancel(nextPreview.approvalId);
+        setPreview(null);
+        setSelectedDeletePaths(new Set());
+        setMessage(t('message.cleanupNothingToReview'));
+        setErrorMessage('');
+        return;
+      }
       setPreview(nextPreview);
       setSelectedDeletePaths(new Set(nextPreview.directories.map((dir) => dir.path)));
       setMessage(successMessage);
       setErrorMessage('');
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -812,7 +841,7 @@ export default function App() {
       setPreview(null);
       setSelectedDeletePaths(new Set());
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       setBusy(false);
     }
@@ -846,23 +875,33 @@ export default function App() {
         setErrorMessage('');
       }
     } catch (error) {
-      setErrorMessage(error instanceof Error ? error.message : String(error));
+      setErrorMessage(toErrorMessage(error));
     } finally {
       setBusy(false);
     }
   }
 
   async function markAllAlertsRead() {
-    const unreadIds = alerts.filter((alert) => !alert.read).map((alert) => alert.id);
-    if (unreadIds.length === 0) return;
-    const next = await window.depClean.alerts.markRead(unreadIds);
-    setAlerts(next.slice(0, ALERT_HISTORY_MAX));
+    try {
+      const unreadIds = alerts.filter((alert) => !alert.read).map((alert) => alert.id);
+      if (unreadIds.length === 0) return;
+      const next = await window.depClean.alerts.markRead(unreadIds);
+      setAlerts(next.slice(0, ALERT_HISTORY_MAX));
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
   }
 
   async function clearAlerts() {
-    await window.depClean.alerts.clear();
-    setAlerts([]);
-    setAlertPage(1);
+    try {
+      await window.depClean.alerts.clear();
+      setAlerts([]);
+      setAlertPage(1);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(toErrorMessage(error));
+    }
   }
 
   async function completeStartupChoice(enableAutoStart: boolean) {
@@ -887,6 +926,16 @@ export default function App() {
 
   const isMonitoring = watchStatus.running;
   const unreadCount = alerts.filter((a) => !a.read).length;
+  const monitorPillClass = !isMonitoring
+    ? 'idle'
+    : watchStatus.degraded
+      ? 'warning'
+      : 'ok';
+  const monitorLabel = !isMonitoring
+    ? t('header.monitoringOff')
+    : watchStatus.degraded
+      ? t('header.monitoringDegraded')
+      : t('header.monitoringOn');
 
   /* ─── Progress percentage ─────────────────────────────────── */
   const progressPct = progress && progress.total > 0
@@ -904,11 +953,16 @@ export default function App() {
         </div>
 
         <div className="sidebar-status">
-          <span className={`pill ${isMonitoring ? 'ok' : 'idle'}`}>
-            {isMonitoring ? t('header.monitoringOn') : t('header.monitoringOff')}
+          <span className={`pill ${monitorPillClass}`}>
+            {monitorLabel}
           </span>
           {watchStatus.watcherCount > 0 && (
             <span className="pill neutral">{t('header.watchers', { count: watchStatus.watcherCount })}</span>
+          )}
+          {watchStatus.failedWatcherCount > 0 && (
+            <span className="pill warning">
+              {t('header.failedWatchers', { count: watchStatus.failedWatcherCount })}
+            </span>
           )}
         </div>
 
@@ -1039,6 +1093,16 @@ export default function App() {
                     {t('dashboard.stopMonitor')}
                   </button>
                 </div>
+                {watchStatus.degraded && (
+                  <div className="inline-note warning">
+                    <div>{t('dashboard.watcherRecoveryNotice', { count: watchStatus.failedWatcherCount })}</div>
+                    <div className="button-row" style={{ marginTop: 8 }}>
+                      {watchStatus.failedWatchTargets.map((targetPath) => (
+                        <code key={targetPath}>{targetPath}</code>
+                      ))}
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Progress */}

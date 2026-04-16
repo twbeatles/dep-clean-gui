@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { toCanonicalPathKey } from './cleanup-policy.js';
 import type { AppScanResult, AppSettings, ThresholdAlert } from './types.js';
 
 const ALERT_HISTORY_MAX = 5000;
@@ -14,6 +15,7 @@ interface EvaluatedThreshold {
   targetId?: string;
   targetPath?: string;
   exceeded: boolean;
+  legacyKeys?: string[];
 }
 
 interface AlertKeySnapshot {
@@ -22,6 +24,19 @@ interface AlertKeySnapshot {
   thresholdBytes: number;
   targetId?: string;
   targetPath?: string;
+}
+
+interface AlertEvaluationOptions {
+  includeGlobalThreshold?: boolean;
+}
+
+interface ConfiguredThreshold {
+  key: string;
+  scope: 'global' | 'target';
+  thresholdBytes: number;
+  targetId?: string;
+  targetPath?: string;
+  legacyKeys: string[];
 }
 
 function getAlertsPath(baseDir?: string): string {
@@ -38,6 +53,18 @@ function toTimestamp(value: string): number {
   return Number.isNaN(ts) ? 0 : ts;
 }
 
+function isErrnoCode(error: unknown, code: string): boolean {
+  if (!error || typeof error !== 'object') return false;
+  return (error as NodeJS.ErrnoException).code === code;
+}
+
+function targetAlertKey(targetPath?: string, targetId?: string): string {
+  if (targetPath && targetPath.trim()) {
+    return `target:${toCanonicalPathKey(targetPath)}`;
+  }
+  return `target:${targetId ?? ''}`;
+}
+
 export class AlertManager {
   private readonly filePath: string;
   private alerts: ThresholdAlert[] = [];
@@ -50,17 +77,29 @@ export class AlertManager {
     this.filePath = getAlertsPath(baseDir);
   }
 
-  private keyForAlert(alert: Pick<ThresholdAlert, 'scope' | 'targetId'>): string {
-    return alert.scope === 'global' ? 'global' : `target:${alert.targetId ?? ''}`;
+  private keyForAlert(alert: Pick<ThresholdAlert, 'scope' | 'targetId' | 'targetPath'>): string {
+    return alert.scope === 'global'
+      ? 'global'
+      : targetAlertKey(alert.targetPath, alert.targetId);
   }
 
   private async hydrate(): Promise<void> {
     if (this.hydrated) return;
 
+    let raw: string | undefined;
     try {
-      const raw = await fs.promises.readFile(this.filePath, 'utf-8');
-      const parsed = JSON.parse(raw);
+      raw = await fs.promises.readFile(this.filePath, 'utf-8');
+    } catch (error) {
+      if (!isErrnoCode(error, 'ENOENT')) {
+        console.warn('[AlertManager] Failed to read alerts history.', error);
+      }
+      this.alerts = [];
+      this.hydrated = true;
+      return;
+    }
 
+    try {
+      const parsed = JSON.parse(raw);
       if (Array.isArray(parsed)) {
         this.alerts = parsed.filter((item): item is ThresholdAlert => {
           return Boolean(
@@ -73,8 +112,12 @@ export class AlertManager {
           );
         });
       }
-    } catch {
+    } catch (error) {
+      await this.backupCorruptAlerts(raw).catch((backupError) => {
+        console.warn('[AlertManager] Failed to back up corrupt alerts history.', backupError);
+      });
       this.alerts = [];
+      await this.persist();
     }
 
     // Rebuild state from chronological history.
@@ -101,7 +144,16 @@ export class AlertManager {
 
   private async persist(): Promise<void> {
     await ensureParentDir(this.filePath);
-    await fs.promises.writeFile(this.filePath, JSON.stringify(this.alerts, null, 2), 'utf-8');
+    const tempPath = `${this.filePath}.${process.pid}.${Date.now()}.tmp`;
+    const content = JSON.stringify(this.alerts, null, 2);
+
+    try {
+      await fs.promises.writeFile(tempPath, content, 'utf-8');
+      await fs.promises.rename(tempPath, this.filePath);
+    } catch (error) {
+      await fs.promises.rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   async list(options?: { limit?: number }): Promise<ThresholdAlert[]> {
@@ -138,18 +190,42 @@ export class AlertManager {
     return this.list();
   }
 
-  async evaluate(scanResult: AppScanResult, settings: AppSettings): Promise<ThresholdAlert[]> {
+  async evaluate(
+    scanResult: AppScanResult,
+    settings: AppSettings,
+    options: AlertEvaluationOptions = {}
+  ): Promise<ThresholdAlert[]> {
     await this.hydrate();
 
     const evaluated: EvaluatedThreshold[] = [];
-    const watchTargetThresholdById = new Map<string, number>();
+    const configuredThresholds = new Map<string, ConfiguredThreshold>();
+    const configuredThresholdAliases = new Set<string>();
+    const includeGlobalThreshold = options.includeGlobalThreshold ?? true;
 
     for (const target of settings.watchTargets) {
       if (!target.targetThresholdBytes || target.targetThresholdBytes <= 0) continue;
-      watchTargetThresholdById.set(target.id, target.targetThresholdBytes);
+
+      const configured: ConfiguredThreshold = {
+        key: targetAlertKey(target.path, target.id),
+        scope: 'target',
+        thresholdBytes: target.targetThresholdBytes,
+        targetId: target.id,
+        targetPath: target.path,
+        legacyKeys: target.id ? [targetAlertKey(undefined, target.id)] : [],
+      };
+
+      configuredThresholds.set(configured.key, configured);
+      configuredThresholdAliases.add(configured.key);
+      for (const legacyKey of configured.legacyKeys) {
+        configuredThresholdAliases.add(legacyKey);
+      }
     }
 
     if (settings.globalThresholdBytes > 0) {
+      configuredThresholdAliases.add('global');
+    }
+
+    if (settings.globalThresholdBytes > 0 && includeGlobalThreshold) {
       evaluated.push({
         key: 'global',
         scope: 'global',
@@ -160,17 +236,18 @@ export class AlertManager {
     }
 
     for (const target of scanResult.targets) {
-      const thresholdBytes = watchTargetThresholdById.get(target.targetId);
-      if (!thresholdBytes) continue;
+      const configured = configuredThresholds.get(targetAlertKey(target.targetPath, target.targetId));
+      if (!configured) continue;
 
       evaluated.push({
-        key: `target:${target.targetId}`,
+        key: configured.key,
         scope: 'target',
-        targetId: target.targetId,
-        targetPath: target.targetPath,
+        targetId: configured.targetId,
+        targetPath: configured.targetPath,
         currentBytes: target.totalSize,
-        thresholdBytes,
-        exceeded: target.totalSize > thresholdBytes,
+        thresholdBytes: configured.thresholdBytes,
+        exceeded: target.totalSize > configured.thresholdBytes,
+        legacyKeys: configured.legacyKeys,
       });
     }
 
@@ -190,8 +267,26 @@ export class AlertManager {
     }
 
     for (const threshold of evaluated) {
-      const active = this.activeState.get(threshold.key) ?? false;
-      const lastAt = this.lastEmittedAt.get(threshold.key) ?? 0;
+      const existingKey = [threshold.key, ...(threshold.legacyKeys ?? [])].find((key) => {
+        return (
+          this.activeState.has(key) ||
+          this.lastEmittedAt.has(key) ||
+          this.lastSnapshotByKey.has(key)
+        );
+      });
+      const stateKey = existingKey ?? threshold.key;
+      const active = this.activeState.get(stateKey) ?? false;
+      const lastAt = this.lastEmittedAt.get(stateKey) ?? 0;
+
+      if (stateKey !== threshold.key) {
+        this.activeState.set(threshold.key, active);
+        if (lastAt > 0) {
+          this.lastEmittedAt.set(threshold.key, lastAt);
+        }
+        this.activeState.delete(stateKey);
+        this.lastEmittedAt.delete(stateKey);
+        this.lastSnapshotByKey.delete(stateKey);
+      }
 
       if (threshold.exceeded) {
         const outOfCooldown = now - lastAt >= cooldownMs;
@@ -238,6 +333,7 @@ export class AlertManager {
 
     for (const [key, active] of [...this.activeState.entries()]) {
       if (evaluatedKeys.has(key)) continue;
+      if (configuredThresholdAliases.has(key)) continue;
 
       const snapshot = this.lastSnapshotByKey.get(key);
       if (active && snapshot) {
@@ -269,6 +365,13 @@ export class AlertManager {
     }
 
     return created;
+  }
+
+  private async backupCorruptAlerts(raw: string): Promise<void> {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = path.join(path.dirname(this.filePath), `alerts.corrupt.${timestamp}.json`);
+    await ensureParentDir(backupPath);
+    await fs.promises.writeFile(backupPath, raw, 'utf-8');
   }
 
   private trimHistory(): boolean {

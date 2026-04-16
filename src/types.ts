@@ -102,6 +102,9 @@ export interface WatchStatus {
   periodicEnabled: boolean;
   realtimeEnabled: boolean;
   watcherCount: number;
+  failedWatcherCount: number;
+  degraded: boolean;
+  failedWatchTargets: string[];
   nextRunAt?: string;
   lastRunAt?: string;
 }

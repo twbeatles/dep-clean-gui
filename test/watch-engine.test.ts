@@ -154,16 +154,22 @@ describe('WatchEngine', () => {
     const started = engine.getStatus();
     assert.equal(started.running, true);
     assert.equal(started.watcherCount > 0, true);
+    assert.equal(started.failedWatcherCount, 0);
+    assert.equal(started.degraded, false);
 
     await engine.stop();
     const stopped = engine.getStatus();
     assert.equal(stopped.running, false);
     assert.equal(stopped.watcherCount, 0);
+    assert.equal(stopped.failedWatcherCount, 0);
+    assert.equal(stopped.degraded, false);
 
     await engine.start();
     const restarted = engine.getStatus();
     assert.equal(restarted.running, true);
     assert.equal(restarted.watcherCount > 0, true);
+    assert.equal(restarted.failedWatcherCount, 0);
+    assert.equal(restarted.degraded, false);
 
     await engine.stop();
   });
@@ -211,10 +217,60 @@ describe('WatchEngine', () => {
     const afterError = engine.getStatus();
     assert.equal(afterError.running, true);
     assert.equal(afterError.watcherCount, 0);
+    assert.equal(afterError.failedWatcherCount, 1);
+    assert.equal(afterError.degraded, true);
+    assert.deepEqual(afterError.failedWatchTargets, [watchPath]);
     assert.equal(watcherErrors.length, 1);
     assert.equal(watcherErrors[0].targetId, 'target-1');
     assert.equal(watcherErrors[0].targetPath, watchPath);
     assert.equal(watcherErrors[0].error, simulatedError);
+
+    await engine.stop();
+  });
+
+  it('retries failed watcher targets and clears degraded state after recovery', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-watch-recover-'));
+    tempRoots.push(root);
+
+    const watchPath = path.join(root, 'watch');
+    mkdirSync(watchPath, { recursive: true });
+
+    const settings = createDefaultSettings();
+    settings.periodicEnabled = false;
+    settings.realtimeEnabled = true;
+    settings.watchTargets = [
+      {
+        id: 'target-1',
+        path: watchPath,
+        enabled: true,
+      },
+    ];
+
+    const engine = new WatchEngine(settings, new AlertManager(root), {}, {
+      watcherRecoveryDelayMs: 50,
+    });
+
+    await engine.start();
+    const engineInternal = engine as unknown as {
+      watchers: Array<{ watcher: { emit: (event: string, error: unknown) => boolean } }>;
+    };
+    const failedWatcher = engineInternal.watchers[0];
+    assert.ok(failedWatcher);
+
+    failedWatcher.watcher.emit('error', new Error('temporary watcher failure'));
+    await delay(30);
+
+    const degraded = engine.getStatus();
+    assert.equal(degraded.degraded, true);
+    assert.equal(degraded.failedWatcherCount, 1);
+
+    await delay(120);
+
+    const recovered = engine.getStatus();
+    assert.equal(recovered.running, true);
+    assert.equal(recovered.degraded, false);
+    assert.equal(recovered.failedWatcherCount, 0);
+    assert.equal(recovered.watcherCount > 0, true);
 
     await engine.stop();
   });

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -18,20 +18,29 @@ afterEach(() => {
   }
 });
 
-function createScanResult(totalSize: number, targetSize: number): AppScanResult {
+function createScanResult(
+  totalSize: number,
+  targetSize: number,
+  options: Partial<AppScanResult> & {
+    targetId?: string;
+    targetPath?: string;
+  } = {}
+): AppScanResult {
+  const now = new Date().toISOString();
   return {
-    runId: randomUUID(),
-    source: 'manual',
-    startedAt: new Date().toISOString(),
-    finishedAt: new Date().toISOString(),
+    runId: options.runId ?? randomUUID(),
+    source: options.source ?? 'manual',
+    setId: options.setId,
+    startedAt: options.startedAt ?? now,
+    finishedAt: options.finishedAt ?? now,
     targets: [
       {
-        targetId: 'target-1',
-        targetPath: '/tmp/project',
+        targetId: options.targetId ?? 'target-1',
+        targetPath: options.targetPath ?? '/tmp/project',
         totalSize: targetSize,
         directories: [],
-        startedAt: new Date().toISOString(),
-        finishedAt: new Date().toISOString(),
+        startedAt: now,
+        finishedAt: now,
         durationMs: 5,
       },
     ],
@@ -121,5 +130,122 @@ describe('AlertManager', () => {
     const resolved = await manager.evaluate(createScanResult(0, 0), settings);
     assert.equal(resolved.length, 2);
     assert.equal(resolved.every((item) => item.status === 'resolved'), true);
+  });
+
+  it('does not resolve active alerts for configured targets omitted from a partial scan', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-alerts-partial-'));
+    tempRoots.push(root);
+
+    const manager = new AlertManager(root);
+    const settings = createDefaultSettings();
+    settings.globalThresholdBytes = 0;
+    settings.watchTargets = [
+      {
+        id: 'target-a',
+        path: '/tmp/project-a',
+        enabled: true,
+        targetThresholdBytes: 100,
+      },
+      {
+        id: 'target-b',
+        path: '/tmp/project-b',
+        enabled: true,
+        targetThresholdBytes: 100,
+      },
+    ];
+
+    const exceeded = await manager.evaluate(createScanResult(150, 150, {
+      targetId: 'target-a',
+      targetPath: '/tmp/project-a',
+    }), settings, {
+      includeGlobalThreshold: false,
+    });
+    assert.equal(exceeded.length, 1);
+    assert.equal(exceeded[0].status, 'exceeded');
+
+    const partial = await manager.evaluate(createScanResult(10, 10, {
+      source: 'scan-set',
+      setId: 'set-1',
+      targetId: 'set-1-0',
+      targetPath: '/tmp/project-b',
+    }), settings, {
+      includeGlobalThreshold: false,
+    });
+    assert.equal(partial.length, 0);
+
+    const alerts = await manager.list();
+    assert.equal(alerts.filter((alert) => alert.status === 'resolved').length, 0);
+  });
+
+  it('keeps active global alerts during partial scans when global evaluation is skipped', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-alerts-global-partial-'));
+    tempRoots.push(root);
+
+    const manager = new AlertManager(root);
+    const settings = createDefaultSettings();
+    settings.globalThresholdBytes = 100;
+
+    const exceeded = await manager.evaluate(createScanResult(150, 0), settings, {
+      includeGlobalThreshold: true,
+    });
+    assert.equal(exceeded.length, 1);
+    assert.equal(exceeded[0].scope, 'global');
+    assert.equal(exceeded[0].status, 'exceeded');
+
+    const partial = await manager.evaluate(createScanResult(10, 0, {
+      source: 'watch-realtime',
+    }), settings, {
+      includeGlobalThreshold: false,
+    });
+    assert.equal(partial.length, 0);
+
+    const alerts = await manager.list();
+    assert.equal(alerts.filter((alert) => alert.scope === 'global' && alert.status === 'resolved').length, 0);
+  });
+
+  it('matches target thresholds by canonical path for scan set and partial scans', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-alerts-scan-set-path-'));
+    tempRoots.push(root);
+
+    const manager = new AlertManager(root);
+    const settings = createDefaultSettings();
+    settings.globalThresholdBytes = 0;
+    settings.watchTargets = [
+      {
+        id: 'target-1',
+        path: '/tmp/project',
+        enabled: true,
+        targetThresholdBytes: 50,
+      },
+    ];
+
+    const alerts = await manager.evaluate(createScanResult(120, 120, {
+      source: 'scan-set',
+      setId: 'set-1',
+      targetId: 'set-1-0',
+      targetPath: '/tmp/project',
+    }), settings, {
+      includeGlobalThreshold: false,
+    });
+
+    assert.equal(alerts.length, 1);
+    assert.equal(alerts[0].status, 'exceeded');
+    assert.equal(alerts[0].targetId, 'target-1');
+    assert.equal(alerts[0].targetPath, '/tmp/project');
+  });
+
+  it('backs up corrupted alerts history before recovery', async () => {
+    const root = mkdtempSync(path.join(os.tmpdir(), 'dep-clean-alerts-corrupt-'));
+    tempRoots.push(root);
+
+    writeFileSync(path.join(root, 'alerts.json'), '{"broken"', 'utf-8');
+
+    const manager = new AlertManager(root);
+    const alerts = await manager.list();
+    assert.equal(alerts.length, 0);
+
+    const files = readdirSync(root);
+    assert.equal(files.includes('alerts.json'), true);
+    assert.equal(files.some((file) => file.startsWith('alerts.corrupt.')), true);
   });
 });

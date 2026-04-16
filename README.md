@@ -125,6 +125,22 @@ dep-clean --exclude vendor,Pods
 - Cleanup confirmation API now rejects empty selections explicitly.
 - Renderer locale consistency was improved by removing remaining hard-coded UI strings.
 
+## Alert Accuracy + Watch Recovery Update (2026-04-16)
+
+- Threshold evaluation now distinguishes full scans from partial scans:
+  - partial scans no longer auto-resolve unrelated active alerts
+  - scan-set / partial target alerts are matched by canonical path, not only transient run ids
+  - global threshold evaluation is skipped for partial scans to avoid misleading resolved notifications
+- Watch runtime now exposes degraded-but-recovering state:
+  - watcher failures move monitor status into a visible recovery state
+  - failed watcher targets are retried automatically in the background
+  - renderer shows recovering target count and paths
+- Alert persistence is now more resilient:
+  - `alerts.json` writes use temp-file replacement
+  - corrupted alert history is backed up as `alerts.corrupt.<timestamp>.json` before recovery
+- Cleanup preview UX is improved:
+  - when no cleanup candidates exist, the renderer shows a user-facing message instead of opening an empty confirm modal
+
 ## Windows Packaging Bridge Stability
 
 - Preload is compiled as CommonJS (`dist/electron/preload.cjs`) for packaged builds.
