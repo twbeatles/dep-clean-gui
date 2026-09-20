@@ -912,14 +912,25 @@ export default function App() {
     setShowStartupChoiceModal(false);
   }
 
+  /* ─── Auto-dismiss success message ─────────────────────────── */
+  useEffect(() => {
+    if (!message) return;
+    const timer = setTimeout(() => setMessage(''), 5000);
+    return () => clearTimeout(timer);
+  }, [message]);
+
+  function dismissBanner() {
+    setMessage('');
+    setErrorMessage('');
+  }
+
   /* ─── Loading State ─────────────────────────────────────────── */
   if (!settings || !watchStatus) {
     return (
       <div className="loading">
-        <div>
-          <p>{t('loading.initializing')}</p>
-          {errorMessage && <p className="error-text">{errorMessage}</p>}
-        </div>
+        <span className="spinner spinner-lg" />
+        <p>{t('loading.initializing')}</p>
+        {errorMessage && <p className="error-text">{errorMessage}</p>}
       </div>
     );
   }
@@ -976,9 +987,7 @@ export default function App() {
               <Icon />
               <span>{label}</span>
               {key === 'alerts' && unreadCount > 0 && (
-                <span className="tag" style={{ marginLeft: 'auto', fontSize: '0.68rem' }}>
-                  {unreadCount}
-                </span>
+                <span className="nav-badge">{unreadCount > 99 ? '99+' : unreadCount}</span>
               )}
             </button>
           ))}
@@ -994,8 +1003,15 @@ export default function App() {
         {/* Status Banner */}
         {(message || errorMessage) && (
           <div className={`status-banner ${errorMessage ? 'has-error' : 'has-ok'}`}>
-            {message && <p className="ok-text">{message}</p>}
-            {errorMessage && <p className="error-text">{errorMessage}</p>}
+            <div className="status-banner-messages">
+              {message && <p className="ok-text">{message}</p>}
+              {errorMessage && <p className="error-text">{errorMessage}</p>}
+            </div>
+            <button className="banner-dismiss" onClick={dismissBanner} aria-label="Dismiss">
+              <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M1 1l10 10M11 1L1 11" />
+              </svg>
+            </button>
           </div>
         )}
 
@@ -1022,7 +1038,7 @@ export default function App() {
                 <article className="metric-card">
                   <div className="metric-icon"><IconClock /></div>
                   <div className="metric-label">{t('dashboard.nextPeriodicRun')}</div>
-                  <div className="metric-value" style={{ fontSize: '0.9rem' }}>
+                  <div className="metric-value small">
                     {watchStatus.nextRunAt ? timestampText(watchStatus.nextRunAt) : t('dashboard.disabled')}
                   </div>
                 </article>
@@ -1034,7 +1050,8 @@ export default function App() {
               <div className="section-block">
                 <div className="section-block-title">{t('dashboard.runControls')}</div>
                 <div className="button-row">
-                  <button className="btn primary" disabled={busy} onClick={() => void runManualScan()}>
+                  <button className={`btn primary${busy ? ' busy' : ''}`} disabled={busy} onClick={() => void runManualScan()}>
+                    {busy && <span className="btn-spinner" />}
                     {t('dashboard.manualScan')}
                   </button>
                   <button
@@ -1086,10 +1103,12 @@ export default function App() {
               <div className="section-block">
                 <div className="section-block-title">{t('dashboard.monitorSectionTitle')}</div>
                 <div className="button-row">
-                  <button className="btn primary" disabled={busy || isMonitoring} onClick={() => void startWatch()}>
+                  <button className={`btn primary${busy && !isMonitoring ? ' busy' : ''}`} disabled={busy || isMonitoring} onClick={() => void startWatch()}>
+                    {busy && !isMonitoring && <span className="btn-spinner" />}
                     {t('dashboard.startMonitor')}
                   </button>
-                  <button className="btn danger" disabled={busy || !isMonitoring} onClick={() => void stopWatch()}>
+                  <button className={`btn danger${busy && isMonitoring ? ' busy' : ''}`} disabled={busy || !isMonitoring} onClick={() => void stopWatch()}>
+                    {busy && isMonitoring && <span className="btn-spinner" />}
                     {t('dashboard.stopMonitor')}
                   </button>
                 </div>
@@ -1304,16 +1323,19 @@ export default function App() {
               <div className="settings-general">
                 <ToggleRow
                   label={t('settings.autoStartOnLogin')}
+                  description={t('settings.autoStartOnLoginDesc')}
                   checked={settings.autoStart}
                   onChange={(checked) => void updateSettings({ autoStart: checked })}
                 />
                 <ToggleRow
                   label={t('settings.enablePeriodicScans')}
+                  description={t('settings.enablePeriodicScansDesc')}
                   checked={settings.periodicEnabled}
                   onChange={(checked) => void updateSettings({ periodicEnabled: checked })}
                 />
                 <ToggleRow
                   label={t('settings.enableRealtimeWatch')}
+                  description={t('settings.enableRealtimeWatchDesc')}
                   checked={settings.realtimeEnabled}
                   onChange={(checked) => void updateSettings({ realtimeEnabled: checked })}
                 />
