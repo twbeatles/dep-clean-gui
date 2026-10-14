@@ -10,3 +10,13 @@ pnpm-debug.log*
 *.tsbuildinfo
 .DS_Store
 settings.corrupt.*.json
+
+# AI Agent & Spec Kit (local only)
+.agents/
+.claude/
+.grok/
+.specify/
+.codegraph/
+AGENTS.md
+specs/
+
